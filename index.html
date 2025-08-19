@@ -32,7 +32,7 @@
     const form = document.getElementById('loginForm');
     const errEl = document.getElementById('loginErr');
 
-    // 이미 로그인 되어 있으면 대시보드로
+    // 이미 로그인 상태면 앱으로
     onAuthStateChanged(auth, (u) => { if (u) location.replace('app.html'); });
 
     form.addEventListener('submit', async (e)=>{
@@ -42,7 +42,7 @@
       const password = document.getElementById('password').value;
       try{
         await signInWithEmailAndPassword(auth, email, password);
-        location.replace('app.html');
+        location.replace('app.html');   // 로그인 성공 → app.html
       }catch(err){
         errEl.textContent = err.message;
       }
