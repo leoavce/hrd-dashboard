@@ -1,6 +1,4 @@
 // js/firebase.js
-// Firebase - 단일 Auth 인스턴스 + 세션 지속성(탭/창 닫으면 해제)
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeAuth, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -14,10 +12,9 @@ const firebaseConfig = {
   storageBucket: "dashboard-7bb43.firebasestorage.app",
   appId: "1:271394458680:web:9948d64b646bcefdfb6acd",
 };
-
 export const app = initializeApp(firebaseConfig);
 
-// 중요: initializeAuth 로 **한 번만** 생성하고, 세션 지속성 지정
+// 로그인 유지: **세션 단위** (탭/창 닫으면 해제)
 export const auth = initializeAuth(app, { persistence: browserSessionPersistence });
 
 export const db = getFirestore(app);
