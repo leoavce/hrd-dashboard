@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HRD 대시보드</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">HRD Dashboard</div>
+    <nav class="actions">
+      <span id="userEmail" class="muted"></span>
+      <button id="loginBtn" class="btn">로그인</button>
+      <button id="logoutBtn" class="btn outline" style="display:none;">로그아웃</button>
+    </nav>
+  </header>
+
+  <!-- 로그인 모달 -->
+  <dialog id="loginDialog" class="dialog">
+    <form id="loginForm" method="dialog" class="form">
+      <h3>이메일 로그인</h3>
+      <label>이메일
+        <input type="email" id="email" autocomplete="username" required />
+      </label>
+      <label>비밀번호
+        <input type="password" id="password" autocomplete="current-password" required />
+      </label>
+      <div class="row">
+        <button class="btn" id="submitLogin" type="submit">로그인</button>
+        <button class="btn ghost" id="closeLogin" type="button">닫기</button>
+      </div>
+      <p class="hint">* 로그인만 되면 누구나 편집/업로드 가능</p>
+      <p id="loginErr" class="err"></p>
+    </form>
+  </dialog>
+
+  <!-- 메인 컨테이너 -->
+  <main id="app"></main>
+
+  <footer class="footer">© 2025 HRD Dashboard</footer>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
