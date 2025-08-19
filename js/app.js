@@ -6,11 +6,11 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstati
 
 // 1) Replace with your actual Firebase config
 const firebaseConfig = {
-  apiKey: "YOUR_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyAFlG7wqAr--sQPup19ztOS5wZk4Kq_xpE",
+  authDomain: "dashboard-7bb43.firebaseapp.com",
+  projectId: "dashboard-7bb43",
+  storageBucket: "dashboard-7bb43.firebasestorage.app",
+  appId: "1:271394458680:web:9948d64b646bcefdfb6acd"
 };
 
 const app = initializeApp(firebaseConfig);
