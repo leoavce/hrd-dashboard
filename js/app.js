@@ -134,6 +134,7 @@ async function renderProgramPage(programId){
         <a class="link" href="#/home">← 목록</a>
         <h2>${prog.emoji || '📘'} ${prog.title}</h2>
         <div class="row">
+          <button id="toggleEdit" class="btn" title="보기/편집 전환">편집</button>
           <button id="deleteProgram" class="btn danger" title="전체 삭제(연도/자산 포함)">프로그램 삭제</button>
         </div>
       </div>
@@ -189,31 +190,69 @@ async function renderProgramPage(programId){
     </section>
   `;
 
-  // --- 자산 링크 렌더링 + 개별 삭제 ---
+  // === 편집 모드 ===
+  let editMode = false; // 기본은 보기 모드
+  const toggleBtn = document.getElementById('toggleEdit');
+
+  function applyEditMode() {
+    // 편집/보기 전환 시 필드 활성화/비활성
+    const editableTextareas = [
+      'widgetNote','budgetDetails','outcomeAnalysis','contentOutline',
+      'yBudget','yDesign','yOutcome','yContent'
+    ].map(id => document.getElementById(id));
+
+    editableTextareas.forEach(el=>{
+      if(!el) return;
+      el.readOnly = !editMode;
+      el.classList.toggle('readonly', !editMode);
+    });
+
+    // 파일 업로드/저장/초기화 버튼 가시성
+    const idsToToggle = ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear'];
+    idsToToggle.forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.classList.toggle('hidden', !editMode);
+    });
+
+    // 자산 삭제 버튼 가시성 재렌더
+    const currentAssets = Array.from(document.querySelectorAll('#designAssets .asset-item'))
+      .map(div=>div.dataset.url);
+    renderAssetLinks(currentAssets || []);
+
+    // 버튼 라벨
+    toggleBtn.textContent = editMode ? '편집 종료' : '편집';
+  }
+
+  toggleBtn.addEventListener('click', ()=>{
+    editMode = !editMode;
+    applyEditMode();
+  });
+
+  // --- 자산 링크 렌더링 + 개별 삭제 (편집 모드에서만 삭제 버튼 노출) ---
   const assetsBox = document.getElementById('designAssets');
   renderAssetLinks(single?.design?.assetLinks || []);
   function renderAssetLinks(list){
-    assetsBox.innerHTML = (list || []).map(url => `
+    assetsBox.innerHTML = (list && list.length) ? list.map(url => `
       <div class="asset-item" data-url="${url}">
         <a href="${url}" target="_blank">${url}</a>
-        <button class="btn danger del-asset">삭제</button>
+        <button class="btn danger del-asset ${editMode ? '' : 'hidden'}">삭제</button>
       </div>
-    `).join('') || `<div class="small muted">첨부된 디자인 자산이 없습니다.</div>`;
-    assetsBox.querySelectorAll('.del-asset').forEach(btn=>{
-      btn.addEventListener('click', ()=> deleteAsset(btn.parentElement.dataset.url));
-    });
+    `).join('') : `<div class="small muted">첨부된 디자인 자산이 없습니다.</div>`;
+
+    if(editMode){
+      assetsBox.querySelectorAll('.del-asset').forEach(btn=>{
+        btn.addEventListener('click', ()=> deleteAsset(btn.parentElement.dataset.url));
+      });
+    }
   }
 
   async function deleteAsset(url){
     if(!confirm('이 파일을 삭제할까요? (Storage에서도 삭제됩니다)')) return;
     try{
-      // Storage 실제 파일 삭제 (URL을 그대로 ref에 넣기)
-      const fileRef = ref(storage, url);
+      const fileRef = ref(storage, url); // URL -> ref
       await deleteObject(fileRef);
-      // Firestore 리스트에서 제거
       const target = doc(db, 'programs', programId, 'years', 'single');
       await updateDoc(target, { 'design.assetLinks': arrayRemove(url) });
-      // UI 갱신
       const after = (await getDoc(target)).data()?.design?.assetLinks || [];
       renderAssetLinks(after);
       alert('삭제되었습니다.');
@@ -224,6 +263,7 @@ async function renderProgramPage(programId){
 
   // --- 위젯 저장 ---
   document.getElementById('saveWidget').addEventListener('click', async ()=>{
+    if(!editMode) return alert('편집 모드에서만 가능합니다.');
     const widgetNote = document.getElementById('widgetNote').value;
     await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote, updatedAt:Date.now() }, { merge:true });
     alert('저장 완료');
@@ -231,6 +271,7 @@ async function renderProgramPage(programId){
 
   // --- 단일 페이지 저장 ---
   document.getElementById('saveItems').addEventListener('click', async ()=>{
+    if(!editMode) return alert('편집 모드에서만 가능합니다.');
     const target = doc(db,'programs',programId,'years','single');
     await setDoc(target, {
       budget:{ details: document.getElementById('budgetDetails').value },
@@ -244,6 +285,7 @@ async function renderProgramPage(programId){
 
   // --- 디자인 파일 업로드 (링크를 Firestore 배열로 저장) ---
   document.getElementById('uploadDesign').addEventListener('click', async ()=>{
+    if(!editMode) return alert('편집 모드에서만 가능합니다.');
     const file = document.getElementById('designFile').files[0];
     if(!file) return alert('파일을 선택하세요.');
     const r = ref(storage, `programs/${programId}/design/${Date.now()}_${file.name}`);
@@ -278,6 +320,7 @@ async function renderProgramPage(programId){
   }
 
   document.getElementById('saveYear').addEventListener('click', async ()=>{
+    if(!editMode) return alert('편집 모드에서만 가능합니다.');
     const y = yearSel.value;
     const yRef = doc(db,'programs',programId,'years',y);
     await setDoc(yRef, {
@@ -291,6 +334,7 @@ async function renderProgramPage(programId){
   });
 
   document.getElementById('clearYear').addEventListener('click', async ()=>{
+    if(!editMode) return alert('편집 모드에서만 가능합니다.');
     const y = yearSel.value;
     if(!confirm(`${y}년 데이터를 비울까요?`)) return;
     const yRef = doc(db,'programs',programId,'years',y);
@@ -301,9 +345,12 @@ async function renderProgramPage(programId){
     alert('해당 연도 내용이 초기화되었습니다.');
   });
 
-  // --- 프로그램 전체 삭제 (연도/메타/스토리지 자산) ---
+  // --- 프로그램 전체 삭제 (확인 코드 필요) ---
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
-    const ok = confirm('이 프로그램의 모든 데이터를 삭제할까요? (연도/요약/디자인 파일 포함)');
+    const code = prompt('프로그램 삭제를 진행하려면 확인 코드(ahnlabhr0315)를 입력하세요.');
+    if(code !== 'ahnlabhr0315'){ alert('코드가 일치하지 않습니다.'); return; }
+
+    const ok = confirm('정말로 이 프로그램의 모든 데이터를 삭제할까요? (연도/요약/디자인 파일 포함, 복구 불가)');
     if(!ok) return;
     try{
       // 1) 연도 문서 삭제 (single + 2021-2024)
@@ -317,7 +364,7 @@ async function renderProgramPage(programId){
       try{
         const all = await listAll(folderRef);
         await Promise.all(all.items.map(i => deleteObject(i)));
-      }catch(e){ /* 폴더가 없을 수 있으니 무시 */ }
+      }catch(e){ /* 폴더가 없을 수 있음 */ }
       // 4) program 문서 삭제
       await deleteDoc(doc(db,'programs',programId));
       alert('프로그램이 삭제되었습니다.');
@@ -326,4 +373,7 @@ async function renderProgramPage(programId){
       console.error(e); alert('삭제 중 오류가 발생했습니다.');
     }
   });
+
+  // 보기 모드로 초기화
+  applyEditMode();
 }
