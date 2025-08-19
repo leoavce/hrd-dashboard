@@ -195,15 +195,23 @@ async function renderProgramPage(programId){
   const toggleBtn = document.getElementById('toggleEdit');
 
   function applyEditMode() {
-    // 편집/보기 전환 시 필드 활성화/비활성
-    const editableTextareas = [
+    // 편집/보기 전환 시 필드 활성/비활성
+    const textareaIds = [
       'widgetNote','budgetDetails','outcomeAnalysis','contentOutline',
       'yBudget','yDesign','yOutcome','yContent'
-    ].map(id => document.getElementById(id));
+    ];
+    const inputIds = ['designNote'];
 
-    editableTextareas.forEach(el=>{
+    textareaIds.forEach(id=>{
+      const el = document.getElementById(id);
       if(!el) return;
       el.readOnly = !editMode;
+      el.classList.toggle('readonly', !editMode);
+    });
+    inputIds.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.disabled = !editMode;
       el.classList.toggle('readonly', !editMode);
     });
 
@@ -220,12 +228,33 @@ async function renderProgramPage(programId){
     renderAssetLinks(currentAssets || []);
 
     // 버튼 라벨
-    toggleBtn.textContent = editMode ? '편집 종료' : '편집';
+    if (toggleBtn) toggleBtn.textContent = editMode ? '편집 종료' : '편집';
   }
 
-  toggleBtn.addEventListener('click', ()=>{
-    editMode = !editMode;
-    applyEditMode();
+  // --- 편집 <-> 보기 토글 (편집 종료 시 저장 확인) ---
+  toggleBtn.addEventListener('click', async ()=>{
+    if (!editMode) {
+      // 보기 → 편집 진입
+      editMode = true;
+      applyEditMode();
+      return;
+    }
+    // 편집 중 → 보기로 나가기 전에 저장 확인
+    const ok = confirm('편집을 완료하고 저장하시겠습니까?');
+    if (!ok) {
+      // 취소: 아무 것도 하지 않고 편집 화면 유지
+      return;
+    }
+    try{
+      await saveAllEdits(); // 전체 저장
+      alert('저장 완료');
+      editMode = false;     // 보기 모드로 전환
+      applyEditMode();
+    }catch(e){
+      console.error(e);
+      alert('저장 중 오류가 발생했습니다.');
+      // 오류 시 편집 상태 유지
+    }
   });
 
   // --- 자산 링크 렌더링 + 개별 삭제 (편집 모드에서만 삭제 버튼 노출) ---
@@ -373,6 +402,43 @@ async function renderProgramPage(programId){
       console.error(e); alert('삭제 중 오류가 발생했습니다.');
     }
   });
+
+  // === 편집 종료 시 한 번에 저장하는 함수 ===
+  async function saveAllEdits(){
+    // 위젯 요약
+    const widgetNote = document.getElementById('widgetNote').value;
+
+    // 단일(항목별) 섹션
+    const budgetDetails = document.getElementById('budgetDetails').value;
+    const designNote = document.getElementById('designNote').value;
+    const outcomeAnalysis = document.getElementById('outcomeAnalysis').value;
+    const contentOutline = document.getElementById('contentOutline').value;
+
+    // 선택 연도 섹션
+    const y = document.getElementById('yearSel').value;
+    const yBudget = document.getElementById('yBudget').value;
+    const yDesign = document.getElementById('yDesign').value;
+    const yOutcome = document.getElementById('yOutcome').value;
+    const yContent = document.getElementById('yContent').value;
+
+    await Promise.all([
+      setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote, updatedAt: Date.now() }, { merge:true }),
+      setDoc(doc(db,'programs',programId,'years','single'), {
+        budget:{ details: budgetDetails },
+        design:{ note: designNote },
+        outcome:{ analysis: outcomeAnalysis },
+        content:{ outline: contentOutline },
+        updatedAt: Date.now()
+      }, { merge:true }),
+      setDoc(doc(db,'programs',programId,'years',y), {
+        budget:{ details: yBudget },
+        design:{ note: yDesign },
+        outcome:{ analysis: yOutcome },
+        content:{ outline: yContent },
+        updatedAt: Date.now()
+      }, { merge:true })
+    ]);
+  }
 
   // 보기 모드로 초기화
   applyEditMode();
