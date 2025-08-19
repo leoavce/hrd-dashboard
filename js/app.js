@@ -1,21 +1,19 @@
 // js/app.js
 import { auth, db, storage } from "./firebase.js";
-import {
-  onAuthStateChanged, signOut
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc,
   arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  ref, uploadBytes, getDownloadURL, deleteObject, listAll, ref as storageRef, refFromURL
+  ref, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 // ---------- 접근 가드 ----------
 onAuthStateChanged(auth, (user)=>{
   if(!user){
-    // 인증 전이면 로그인 페이지로
-    location.replace('login.html');
+    // 인증 해제/미인증 상태 → 로그인 페이지로
+    location.replace('index.html');
     return;
   }
   // 로그인 후 앱 초기화
@@ -30,7 +28,7 @@ async function boot(){
   logoutBtn.addEventListener('click', async ()=>{
     try{
       await signOut(auth);
-      location.replace('login.html');
+      location.replace('index.html');
     }catch(e){ console.error(e); }
   });
 
@@ -124,7 +122,7 @@ async function renderProgramPage(programId){
   }
   const prog = { id: programId, ...progSnap.data() };
 
-  // 현재 저장된 single/years/asset 링크 전부 읽어와서 **즉시 표시**
+  // 기존 데이터 로딩 (즉시 표시)
   const singleSnap = await getDoc(doc(db, 'programs', programId, 'years', 'single'));
   const single = singleSnap.exists() ? singleSnap.data() : { design:{ assetLinks:[] } };
   const summarySnap = await getDoc(doc(db, 'programs', programId, 'meta', 'summary'));
@@ -140,7 +138,7 @@ async function renderProgramPage(programId){
         </div>
       </div>
 
-      <!-- 위젯: 현재 저장 내용 즉시 보이기 -->
+      <!-- 위젯 -->
       <section class="section">
         <h3>위젯(종합)</h3>
         <textarea id="widgetNote" placeholder="예산/디자인/성과/내용 요약">${summary.widgetNote || ''}</textarea>
@@ -149,7 +147,7 @@ async function renderProgramPage(programId){
         </div>
       </section>
 
-      <!-- 항목별 단일 페이지(읽기 + 편집) -->
+      <!-- 항목별 단일 페이지 -->
       <section class="section">
         <h3>항목별 단일 페이지</h3>
         <div class="kv"><strong>예산</strong><textarea id="budgetDetails" placeholder="평균 예산 및 지출 항목">${single?.budget?.details || ''}</textarea></div>
@@ -191,7 +189,7 @@ async function renderProgramPage(programId){
     </section>
   `;
 
-  // --- 기존 asset 링크 렌더링 + 개별 삭제 ---
+  // --- 자산 링크 렌더링 + 개별 삭제 ---
   const assetsBox = document.getElementById('designAssets');
   renderAssetLinks(single?.design?.assetLinks || []);
   function renderAssetLinks(list){
@@ -209,9 +207,9 @@ async function renderProgramPage(programId){
   async function deleteAsset(url){
     if(!confirm('이 파일을 삭제할까요? (Storage에서도 삭제됩니다)')) return;
     try{
-      // Storage에서 실제 파일 삭제
-      const r = refFromURL(url);
-      await deleteObject(r);
+      // Storage 실제 파일 삭제 (URL을 그대로 ref에 넣기)
+      const fileRef = ref(storage, url);
+      await deleteObject(fileRef);
       // Firestore 리스트에서 제거
       const target = doc(db, 'programs', programId, 'years', 'single');
       await updateDoc(target, { 'design.assetLinks': arrayRemove(url) });
@@ -244,7 +242,7 @@ async function renderProgramPage(programId){
     alert('저장 완료');
   });
 
-  // --- 디자인 파일 업로드(링크를 Firestore에 저장하여 '기존 데이터 표시'에 활용) ---
+  // --- 디자인 파일 업로드 (링크를 Firestore 배열로 저장) ---
   document.getElementById('uploadDesign').addEventListener('click', async ()=>{
     const file = document.getElementById('designFile').files[0];
     if(!file) return alert('파일을 선택하세요.');
@@ -303,23 +301,23 @@ async function renderProgramPage(programId){
     alert('해당 연도 내용이 초기화되었습니다.');
   });
 
-  // --- 전체 프로그램 삭제(연도/메타/스토리지 폴더까지) ---
+  // --- 프로그램 전체 삭제 (연도/메타/스토리지 자산) ---
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
     const ok = confirm('이 프로그램의 모든 데이터를 삭제할까요? (연도/요약/디자인 파일 포함)');
     if(!ok) return;
     try{
-      // 1) years (single + 2021-2024)
+      // 1) 연도 문서 삭제 (single + 2021-2024)
       for(const y of ['single','2021','2022','2023','2024']){
         await deleteDoc(doc(db,'programs',programId,'years',y));
       }
-      // 2) meta/summary
+      // 2) meta/summary 삭제
       await deleteDoc(doc(db,'programs',programId,'meta','summary'));
       // 3) storage 폴더 내 파일 삭제
-      const folder = storageRef(storage, `programs/${programId}/design`);
+      const folderRef = ref(storage, `programs/${programId}/design`);
       try{
-        const all = await listAll(folder);
+        const all = await listAll(folderRef);
         await Promise.all(all.items.map(i => deleteObject(i)));
-      }catch(e){ /* 폴더 없을 수 있음: 무시 */ }
+      }catch(e){ /* 폴더가 없을 수 있으니 무시 */ }
       // 4) program 문서 삭제
       await deleteDoc(doc(db,'programs',programId));
       alert('프로그램이 삭제되었습니다.');
