@@ -33,7 +33,7 @@
     const errEl = document.getElementById('loginErr');
 
     // 이미 로그인 되어 있으면 대시보드로
-    onAuthStateChanged(auth, (u) => { if (u) location.replace('index.html'); });
+    onAuthStateChanged(auth, (u) => { if (u) location.replace('app.html'); });
 
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
@@ -42,7 +42,7 @@
       const password = document.getElementById('password').value;
       try{
         await signInWithEmailAndPassword(auth, email, password);
-        location.replace('index.html');
+        location.replace('app.html');
       }catch(err){
         errEl.textContent = err.message;
       }
