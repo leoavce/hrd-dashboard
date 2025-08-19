@@ -9,8 +9,9 @@ import {
   ref, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
-// ★ 신규: 스키마 모듈
+// ★ 스키마 모듈 & UI
 import { getProgramSchema, SECTION_DEFS, DEFAULT_SCHEMA } from "./programSchema.js";
+import { openSchemaEditor } from "./schemaUI.js";
 
 // ---------- 접근 가드 ----------
 onAuthStateChanged(auth, (user)=>{
@@ -45,7 +46,7 @@ function route(){
   else { renderHome(); }
 }
 
-// ---------- 초기 시드 ----------
+// ---------- 시드 ----------
 const DEFAULT_PROGRAMS = [
   { id:'devconf', title:'개발자 컨퍼런스', emoji:'🧑‍💻' },
   { id:'ai-training', title:'AI 활용 교육', emoji:'🤖' },
@@ -59,9 +60,7 @@ async function ensureProgramsSeeded(){
     for(const p of DEFAULT_PROGRAMS){
       await setDoc(doc(db, 'programs', p.id), { title:p.title, emoji:p.emoji, createdAt:Date.now() });
       await setDoc(doc(db, 'programs', p.id, 'meta', 'summary'), { widgetNote:'요약 위젯', updatedAt:Date.now() });
-      // 기본 스키마 저장
       await setDoc(doc(db,'programs',p.id,'meta','schema'), { sections: DEFAULT_SCHEMA.sections, updatedAt: Date.now() }, { merge:true });
-
       for(const y of ['2021','2022','2023','2024']){
         await setDoc(doc(db, 'programs', p.id, 'years', y), {
           budget:{ avg:0, details:'' }, design:{ note:'', assetLinks:[] }, outcome:{ analysis:'' }, content:{ outline:'' }, updatedAt:Date.now()
@@ -110,13 +109,12 @@ async function renderHome(){
     const title = prompt('표시 이름'); if(!title) return;
     const emoji = prompt('이모지(예: 🎯)') || '📘';
     await setDoc(doc(db, 'programs', id), { title, emoji, createdAt:Date.now() });
-    // 기본 스키마 부여
     await setDoc(doc(db,'programs',id,'meta','schema'), { sections: DEFAULT_SCHEMA.sections, updatedAt: Date.now() }, { merge:true });
     location.reload();
   });
 }
 
-// ---------- 상세 (스키마 기반 동적 렌더) ----------
+// ---------- 상세 (스키마 기반) ----------
 async function renderProgramPage(programId){
   const progRef = doc(db, 'programs', programId);
   const progSnap = await getDoc(progRef);
@@ -126,7 +124,6 @@ async function renderProgramPage(programId){
   }
   const prog = { id: programId, ...progSnap.data() };
 
-  // 데이터 프리페치
   const [singleSnap, summarySnap, schema] = await Promise.all([
     getDoc(doc(db, 'programs', programId, 'years', 'single')),
     getDoc(doc(db, 'programs', programId, 'meta', 'summary')),
@@ -135,46 +132,42 @@ async function renderProgramPage(programId){
 
   const single = singleSnap.exists() ? singleSnap.data() : { design:{ assetLinks:[] } };
   const summary = summarySnap.exists() ? summarySnap.data() : {};
-  const sections = schema.sections && schema.sections.length ? schema.sections : DEFAULT_SCHEMA.sections;
+  const sections = (schema.sections && schema.sections.length) ? schema.sections : DEFAULT_SCHEMA.sections;
 
-  // 섹션별 HTML 조립
-  const htmlChunks = [];
+  const html = [];
 
-  // 툴바
-  htmlChunks.push(`
+  // 툴바 (★ 섹션 구성 버튼 추가)
+  html.push(`
     <section class="container">
       <div class="toolbar">
         <a class="link" href="#/home">← 목록</a>
         <h2>${prog.emoji || '📘'} ${prog.title}</h2>
         <div class="row">
+          <button id="editSchema" class="btn ghost" title="표시 섹션 구성">섹션 구성</button>
           <button id="toggleEdit" class="btn" title="보기/편집 전환">편집</button>
           <button id="deleteProgram" class="btn danger" title="전체 삭제(연도/자산 포함)">프로그램 삭제</button>
         </div>
       </div>
   `);
 
-  // widget
   if (sections.includes('widget')) {
-    htmlChunks.push(`
+    html.push(`
       <section class="section">
         <h3>${SECTION_DEFS['widget'].title}</h3>
         <textarea id="widgetNote" placeholder="예산/디자인/성과/내용 요약">${summary.widgetNote || ''}</textarea>
-        <div class="row">
-          <button id="saveWidget" class="btn">저장</button>
-        </div>
+        <div class="row"><button id="saveWidget" class="btn">저장</button></div>
       </section>
     `);
   }
 
-  // 단일 항목 묶음: 필요 섹션이 하나라도 있으면 묶어서 출력
   const singleIds = sections.filter(s => s.startsWith('single:'));
   if (singleIds.length) {
-    htmlChunks.push(`<section class="section"><h3>항목별 단일 페이지</h3>`);
+    html.push(`<section class="section"><h3>항목별 단일 페이지</h3>`);
     if (singleIds.includes('single:budget')) {
-      htmlChunks.push(`<div class="kv"><strong>${SECTION_DEFS['single:budget'].title}</strong><textarea id="budgetDetails" placeholder="평균 예산 및 지출 항목">${single?.budget?.details || ''}</textarea></div>`);
+      html.push(`<div class="kv"><strong>${SECTION_DEFS['single:budget'].title}</strong><textarea id="budgetDetails" placeholder="평균 예산 및 지출 항목">${single?.budget?.details || ''}</textarea></div>`);
     }
     if (singleIds.includes('single:design')) {
-      htmlChunks.push(`
+      html.push(`
         <div class="kv"><strong>${SECTION_DEFS['single:design'].title}</strong>
           <div>
             <input id="designNote" placeholder="디자인 설명/비고" value="${single?.design?.note || ''}" />
@@ -188,17 +181,16 @@ async function renderProgramPage(programId){
       `);
     }
     if (singleIds.includes('single:outcome')) {
-      htmlChunks.push(`<div class="kv"><strong>${SECTION_DEFS['single:outcome'].title}</strong><textarea id="outcomeAnalysis" placeholder="설문 데이터 분석 요약">${single?.outcome?.analysis || ''}</textarea></div>`);
+      html.push(`<div class="kv"><strong>${SECTION_DEFS['single:outcome'].title}</strong><textarea id="outcomeAnalysis" placeholder="설문 데이터 분석 요약">${single?.outcome?.analysis || ''}</textarea></div>`);
     }
     if (singleIds.includes('single:content')) {
-      htmlChunks.push(`<div class="kv"><strong>${SECTION_DEFS['single:content'].title}</strong><textarea id="contentOutline" placeholder="강의/세션 구성 요약">${single?.content?.outline || ''}</textarea></div>`);
+      html.push(`<div class="kv"><strong>${SECTION_DEFS['single:content'].title}</strong><textarea id="contentOutline" placeholder="강의/세션 구성 요약">${single?.content?.outline || ''}</textarea></div>`);
     }
-    htmlChunks.push(`<div class="row"><button id="saveItems" class="btn">저장</button></div></section>`);
+    html.push(`<div class="row"><button id="saveItems" class="btn">저장</button></div></section>`);
   }
 
-  // 연도별
   if (sections.includes('yearly')) {
-    htmlChunks.push(`
+    html.push(`
       <section class="section">
         <h3>${SECTION_DEFS['yearly'].title}</h3>
         <div class="row">
@@ -219,9 +211,8 @@ async function renderProgramPage(programId){
     `);
   }
 
-  // container 닫기
-  htmlChunks.push(`</section>`);
-  appEl.innerHTML = htmlChunks.join('\n');
+  html.push(`</section>`);
+  appEl.innerHTML = html.join('\n');
 
   // === 편집 모드 ===
   let editMode = false;
@@ -247,13 +238,11 @@ async function renderProgramPage(programId){
       el.classList.toggle('readonly', !editMode);
     });
 
-    // 파일/저장 버튼들 존재할 때만 토글
     ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.classList.toggle('hidden', !editMode);
     });
 
-    // 자산 삭제 버튼 가시성 재렌더 (디자인 섹션 있는 경우에만)
     const assetsWrap = document.getElementById('designAssets');
     if (assetsWrap) {
       const currentAssets = Array.from(assetsWrap.querySelectorAll('.asset-item')).map(div=>div.dataset.url);
@@ -263,13 +252,13 @@ async function renderProgramPage(programId){
     if (toggleBtn) toggleBtn.textContent = editMode ? '편집 종료' : '편집';
   }
 
-  // --- 편집 토글 (편집 종료 시 저장 확인) ---
+  // 편집 토글 (+ 종료 시 저장 확인)
   toggleBtn.addEventListener('click', async ()=>{
     if (!editMode) { editMode = true; applyEditMode(); return; }
     const ok = confirm('편집을 완료하고 저장하시겠습니까?');
     if (!ok) return;
     try{
-      await saveAllEdits(); // 아래 정의
+      await saveAllEdits();
       alert('저장 완료');
       editMode = false;
       applyEditMode();
@@ -279,11 +268,14 @@ async function renderProgramPage(programId){
     }
   });
 
-  // --- 디자인 자산 렌더/삭제 (디자인 섹션 있을 때만) ---
+  // ★ 섹션 구성 버튼 -> 모달 열기
+  document.getElementById('editSchema')?.addEventListener('click', ()=>{
+    openSchemaEditor(db, programId, () => renderProgramPage(programId));
+  });
+
+  // 디자인 자산 렌더/삭제
   const assetsBox = document.getElementById('designAssets');
-  if (assetsBox) {
-    renderAssetLinks(single?.design?.assetLinks || []);
-  }
+  if (assetsBox) renderAssetLinks(single?.design?.assetLinks || []);
   function renderAssetLinks(list){
     if (!assetsBox) return;
     assetsBox.innerHTML = (list && list.length) ? list.map(url => `
@@ -315,7 +307,7 @@ async function renderProgramPage(programId){
     }
   }
 
-  // --- 위젯 저장 (존재 시) ---
+  // 저장들
   const saveWidgetBtn = document.getElementById('saveWidget');
   if (saveWidgetBtn) {
     saveWidgetBtn.addEventListener('click', async ()=>{
@@ -326,7 +318,6 @@ async function renderProgramPage(programId){
     });
   }
 
-  // --- 단일 섹션 저장 (존재 시) ---
   const saveItemsBtn = document.getElementById('saveItems');
   if (saveItemsBtn) {
     saveItemsBtn.addEventListener('click', async ()=>{
@@ -347,7 +338,6 @@ async function renderProgramPage(programId){
     });
   }
 
-  // --- 디자인 파일 업로드 (디자인 섹션 있을 때만) ---
   const uploadBtn = document.getElementById('uploadDesign');
   if (uploadBtn) {
     uploadBtn.addEventListener('click', async ()=>{
@@ -364,12 +354,8 @@ async function renderProgramPage(programId){
     });
   }
 
-  // --- 연도별 로드/저장/비우기 (연도 섹션 있을 때만) ---
   const yearSel = document.getElementById('yearSel');
-  if (yearSel) {
-    yearSel.addEventListener('change', ()=> loadYear(yearSel.value));
-    await loadYear(yearSel.value);
-  }
+  if (yearSel) { yearSel.addEventListener('change', ()=> loadYear(yearSel.value)); await loadYear(yearSel.value); }
 
   async function loadYear(y){
     const yRef = doc(db,'programs',programId,'years',y);
@@ -421,32 +407,24 @@ async function renderProgramPage(programId){
     });
   }
 
-  // --- 프로그램 전체 삭제 (확인 코드 필요) ---
+  // 삭제
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
     const code = prompt('프로그램 삭제를 진행하려면 확인 코드(ahnlabhr0315)를 입력하세요.');
     if(code !== 'ahnlabhr0315'){ alert('코드가 일치하지 않습니다.'); return; }
-
     const ok = confirm('정말로 이 프로그램의 모든 데이터를 삭제할까요? (연도/요약/디자인 파일 포함, 복구 불가)');
     if(!ok) return;
     try{
-      // 스토리지 파일 제거
       try{
         const folderRef = ref(storage, `programs/${programId}/design`);
         const all = await listAll(folderRef);
         await Promise.all(all.items.map(i => deleteObject(i)));
-      }catch(e){ /* 폴더 없을 수 있음 */ }
-
-      // 연도 문서 삭제
+      }catch(e){}
       for(const y of ['single','2021','2022','2023','2024']){
         await deleteDoc(doc(db,'programs',programId,'years',y));
       }
-      // 메타 삭제
       await deleteDoc(doc(db,'programs',programId,'meta','summary'));
       await deleteDoc(doc(db,'programs',programId,'meta','schema'));
-
-      // 프로그램 문서 삭제
       await deleteDoc(doc(db,'programs',programId));
-
       alert('프로그램이 삭제되었습니다.');
       location.hash = '#/home';
     }catch(e){
@@ -454,35 +432,27 @@ async function renderProgramPage(programId){
     }
   });
 
-  // === 편집 종료 시 한 번에 저장 ===
+  // 편집 종료 시 일괄 저장
   async function saveAllEdits(){
     const tasks = [];
-
-    // widget
     const widgetEl = document.getElementById('widgetNote');
     if (widgetEl) {
       tasks.push(setDoc(doc(db,'programs',programId,'meta','summary'), {
         widgetNote: widgetEl.value, updatedAt: Date.now()
       }, { merge:true }));
     }
-
-    // single
     const singlePayload = { updatedAt: Date.now() };
     const budgetDetailsEl = document.getElementById('budgetDetails');
     const designNoteEl    = document.getElementById('designNote');
     const outcomeEl       = document.getElementById('outcomeAnalysis');
     const contentEl       = document.getElementById('contentOutline');
-
     if (budgetDetailsEl) singlePayload.budget = { details: budgetDetailsEl.value };
     if (designNoteEl)    singlePayload.design = { ...(singlePayload.design||{}), note: designNoteEl.value };
     if (outcomeEl)       singlePayload.outcome = { analysis: outcomeEl.value };
     if (contentEl)       singlePayload.content = { outline: contentEl.value };
-
     if (Object.keys(singlePayload).length > 1) {
       tasks.push(setDoc(doc(db,'programs',programId,'years','single'), singlePayload, { merge:true }));
     }
-
-    // yearly
     const yearSelEl = document.getElementById('yearSel');
     if (yearSelEl) {
       const y = yearSelEl.value;
@@ -494,10 +464,8 @@ async function renderProgramPage(programId){
         updatedAt: Date.now()
       }, { merge:true }));
     }
-
     await Promise.all(tasks);
   }
 
-  // 초기 상태: 보기 모드
-  applyEditMode();
+  applyEditMode(); // 초기: 보기 모드
 }
