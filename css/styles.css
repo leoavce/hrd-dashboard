@@ -1,114 +1,191 @@
-/* ===== AhnLab Global Theme (색상만 통일) ===== */
+/* =========================================================
+   AhnLab HRD Dashboard — Blue/White High-Contrast Theme
+   * 기능 코드 보존, 스타일만 정리
+   * 레이아웃 최대폭 1600px (넓게 사용)
+   * 블루(헤더/툴바) + 화이트(콘텐츠 카드)
+   * 모듈에서 사용하는 CSS 변수 유지/확장
+   ========================================================= */
+
+/* ---------- Color Tokens ---------- */
 :root{
-  --ahn-bg:#1D4F91;         /* 메인 블루 (배경용) */
-  --ahn-bg-2:#224c8a;       /* 보조 블루 */
-  --ahn-surface:#ffffff;    /* 카드/표 배경 */
-  --ahn-surface-2:#f5f7fb;  /* 옅은 면/표 줄무늬 */
-  --ahn-line:#d7e2f1;       /* 경계선 */
-  --ahn-text:#0f1c2e;       /* 본문 텍스트 */
-  --ahn-muted:#5d718f;      /* 보조 텍스트 */
-  --ahn-primary:#2f6fcb;    /* 포인트 파랑 */
-  --ahn-primary-weak:#e7f0ff; /* 연한 포인트 */
+  --ahn-blue:#1D4F91;          /* 메인 블루(툴바/헤더) */
+  --ahn-blue-2:#123a6b;        /* 블루 음영 */
+  --ahn-accent:#2f6fcb;        /* 포인트 파랑(버튼 포커스 등) */
+
+  --ahn-surface:#ffffff;       /* 카드/내용 배경 */
+  --ahn-surface-2:#f3f7ff;     /* 옅은 파랑 면(표/보조 박스) */
+  --ahn-line:#cdd9ea;          /* 경계선 */
+  --ahn-text:#0a1628;          /* 본문 텍스트(짙은 남청) */
+  --ahn-muted:#5d718f;         /* 보조 텍스트 */
+  --ahn-shadow:0 10px 30px rgba(13,48,97,.08);
 }
 
-/* 기본 타이포 (원래 값 유지 + 색만 변수 사용) */
-body {
-  color: var(--ahn-text);
+/* ---------- Base ---------- */
+*{ box-sizing: border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  color:var(--ahn-text);
+  background:#fff;
   font-family: 'Noto Sans KR', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #fff;
-  margin: 0;
+  line-height:1.45;
 }
 
-/* 공통 버튼(기존 스타일 유지, 색만 변수로) */
+/* 링크/버튼 기본 톤 */
+a{ color:var(--ahn-accent); text-decoration:none; }
+a:hover{ text-decoration:underline; }
 .btn{
-  background: var(--ahn-primary-weak);
-  color: var(--ahn-text);
-  border: 1px solid var(--ahn-line);
-  border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
+  display:inline-flex; align-items:center; justify-content:center;
+  gap:6px;
+  padding:8px 12px;
+  border:1px solid var(--ahn-line);
+  border-radius:10px;
+  background:var(--ahn-surface-2);
+  color:var(--ahn-blue);
+  cursor:pointer;
+  transition:filter .15s ease, transform .05s ease;
 }
-.btn:hover{ filter: brightness(0.98); }
+.btn:hover{ filter:brightness(.98); }
+.btn:active{ transform:translateY(1px); }
+.btn.small{ padding:4px 10px; font-size:.92rem; }
+.btn.ghost{ background:#fff; color:var(--ahn-blue); }
 .btn.danger{ background:#ffeceb; color:#8c1a12; border-color:#ffd3cf; }
-.btn.ghost{ background:#fff; }
-.link{ color: var(--ahn-primary); text-decoration: none; }
+.link{ color:var(--ahn-accent); }
 
-/* 컨테이너 폭(대시보드 쪽) — 기능 그대로, 색만 맞춤 */
-.container{ max-width:1280px; margin: 0 auto; padding: 16px; }
-
-/* ===== 로그인 페이지 전용 ===== */
-body.login-page {
-  display: flex;
-  min-height: 100vh;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  /* 안랩 블루 그라디언트 (이미지와 유사한 느낌) */
-  background: linear-gradient(180deg, var(--ahn-bg) 0%, var(--ahn-bg-2) 100%);
+/* ---------- Layout ---------- */
+.container{
+  max-width:1600px;       /* 넓게 사용 */
+  margin:0 auto;
+  padding:24px;
 }
 
-.login-container {
-  width: 380px;
-  background: var(--ahn-surface);
-  border: 1px solid var(--ahn-line);
-  border-radius: 14px;
-  box-shadow: 0 10px 28px rgba(0,0,0,.18);
-  padding: 28px 32px;
-  text-align: center;
+/* 상단 툴바를 블루, 본문은 화이트 카드 */
+.toolbar{
+  background: linear-gradient(180deg, var(--ahn-blue) 0%, var(--ahn-blue-2) 100%);
+  color:#fff;
+  border-radius:14px;
+  padding:16px 18px;
+  margin-bottom:24px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  box-shadow:var(--ahn-shadow);
+}
+.toolbar h2{ margin:0; font-weight:800; letter-spacing:.2px; }
+.toolbar .row{ display:flex; gap:8px; align-items:center; }
+.toolbar .btn{ background:#fff; color:var(--ahn-blue); border-color:#e4ecff; }
+.toolbar .btn.danger{ background:#ffeceb; color:#8c1a12; border-color:#ffd3cf; }
+
+/* 섹션 간격 강화 */
+#sec-widgets, #sec-items, #sec-years{ margin:24px 0; }
+
+/* 카드성 박스들의 공통 톤(모듈 주입 스타일 위에 올라오도록 !important 최소 사용) */
+.card, .section, .it-sec, .yr,
+.wg-card, .it-card, .yr-box{
+  background:var(--ahn-surface) !important;
+  border:1px solid var(--ahn-line) !important;
+  border-radius:12px !important;
+  box-shadow:var(--ahn-shadow);
 }
 
-.login-container h2 {
-  margin: 0 0 6px;
-  color: var(--ahn-surface); /* 헤더 텍스트는 히어로 색과 매칭 */
-  background: var(--ahn-bg);
-  border-radius: 10px;
-  padding: 14px 12px;
-  font-size: 1.25rem;
-  font-weight: 700;
+/* 표/리스트 보조 면 */
+.mini-table .row,
+.x-table th, .x-table td{
+  background:#fff;
+  border-color:var(--ahn-line);
+  color:var(--ahn-text);
+}
+.mini-table .row{
+  display:grid; grid-template-columns: 1fr auto; gap:8px;
+  border:1px solid var(--ahn-line);
+  border-radius:8px;
+  padding:6px 8px;
+  background:var(--ahn-surface-2);
 }
 
-.login-container .subtitle{
-  color: var(--ahn-muted);
-  font-size: .92rem;
-  margin: 10px 0 16px;
+/* 갤러리 썸네일 */
+.gal .thumb{
+  background:var(--ahn-surface-2);
+  border:1px solid var(--ahn-line);
+  border-radius:8px;
+  overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+}
+.gal .thumb img{ width:100%; height:100%; object-fit:cover; }
+
+/* ---------- Grid/Card Helpers (홈 카드 등 기존 클래스 유지) ---------- */
+.grid{
+  display:grid;
+  grid-template-columns: repeat( auto-fill, minmax(260px, 1fr) );
+  gap:12px;
+}
+.card .emoji{ font-size:28px; }
+.card .title{ font-weight:700; margin-top:6px; }
+.small{ font-size:.9rem; }
+.muted{ color:var(--ahn-muted); }
+.err{ color:#b00020; }
+
+/* ---------- 년도 필터 pill (년도별 페이지) ---------- */
+.yr-filter{ display:flex; gap:6px; flex-wrap:wrap; }
+.pill{
+  border:1px solid var(--ahn-line);
+  background:#fff;
+  color:var(--ahn-blue);
+  border-radius:999px;
+  padding:6px 10px;
+  cursor:pointer;
+}
+.pill.active{ background:var(--ahn-surface-2); }
+
+/* ---------- 테이블 ---------- */
+.x-table{ width:100%; border-collapse:collapse; }
+.x-table th, .x-table td{ border-bottom:1px solid var(--ahn-line); padding:8px 10px; text-align:left; }
+.x-table thead th{ position:sticky; top:0; background:#f7fbff; }
+
+/* ---------- 입력 컨트롤(모달 편집 포함) ---------- */
+input, textarea, select{
+  background:#fff;
+  color:var(--ahn-text);
+  border:1px solid var(--ahn-line);
+  border-radius:10px;
+  padding:8px 10px;
+  font:inherit;
+}
+input:focus, textarea:focus, select:focus{
+  outline:none;
+  border-color:var(--ahn-accent);
+  box-shadow:0 0 0 3px rgba(47,111,203,.15);
 }
 
-.login-container input {
-  width: 100%;
-  padding: 12px 14px;
-  margin: 8px 0;
-  background: #fff;
-  color: var(--ahn-text);
-  border: 1px solid var(--ahn-line);
-  border-radius: 10px;
-  font-size: 1rem;
-  transition: border-color .2s, box-shadow .2s;
+/* ---------- 로그인 페이지 ---------- */
+body.login-page{
+  display:flex; align-items:center; justify-content:center;
+  min-height:100vh; margin:0;
+  background: linear-gradient(180deg, var(--ahn-blue) 0%, var(--ahn-blue-2) 100%);
 }
-.login-container input::placeholder{ color:#9fb0c8; }
-.login-container input:focus {
-  outline: none;
-  border-color: var(--ahn-primary);
-  box-shadow: 0 0 0 3px rgba(47,111,203,.2);
+.login-wrap{ width:100%; max-width:480px; padding:24px; }
+.login-card{
+  background:#fff; border:1px solid var(--ahn-line); border-radius:14px;
+  box-shadow:var(--ahn-shadow); padding:26px 28px; text-align:center;
+}
+.login-card h2{
+  margin:0 0 6px; font-weight:800; color:var(--ahn-blue);
+}
+.login-card .subtitle{ color:var(--ahn-muted); margin:6px 0 14px; }
+.login-card .form label{ display:block; text-align:left; margin:8px 0; }
+
+/* ---------- 섹션 헤더 ---------- */
+.sec .sec-hd h3,
+.it-hd .l, .yr-hd{
+  color:var(--ahn-blue);
+  font-weight:800;
 }
 
-.login-container button {
-  width: 100%;
-  padding: 12px 14px;
-  margin-top: 10px;
-  background: var(--ahn-primary);
-  border: 1px solid var(--ahn-primary);
-  color: #fff;
-  font-size: 1.05rem;
-  font-weight: 600;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: transform .05s ease, filter .2s ease;
-}
-.login-container button:hover{ filter: brightness(0.97); }
-.login-container button:active{ transform: translateY(1px); }
+/* ---------- 여백/정렬 소도구 ---------- */
+.row{ display:flex; gap:8px; align-items:center; }
+.kv{ display:grid; gap:8px; }
 
-.login-container .footer-text {
-  margin-top: 14px;
-  font-size: 0.86rem;
-  color: var(--ahn-muted);
-}
+/* ---------- 대비 보정 (어둡게 보이던 텍스트/배경) ---------- */
+.wg-hd, .it-card .cap, .yr-cap{ color:var(--ahn-blue); }
+.wg-bd, .ft, .bul, .muted, .mini-table{ color:var(--ahn-text); }
