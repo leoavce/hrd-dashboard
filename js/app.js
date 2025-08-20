@@ -136,7 +136,7 @@ async function renderProgramPage(programId){
 
   const html = [];
 
-  // 툴바 (★ 섹션 구성 버튼 추가)
+  // 툴바 (섹션 구성 버튼은 렌더하되 기본적으로 숨김 처리 -> 편집 모드에서만 표시)
   html.push(`
     <section class="container">
       <div class="toolbar">
@@ -238,7 +238,8 @@ async function renderProgramPage(programId){
       el.classList.toggle('readonly', !editMode);
     });
 
-    ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear'].forEach(id=>{
+    // ★ 편집 모드에서만 노출할 버튼 목록에 'editSchema' 추가
+    ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear','editSchema'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.classList.toggle('hidden', !editMode);
     });
@@ -268,7 +269,7 @@ async function renderProgramPage(programId){
     }
   });
 
-  // ★ 섹션 구성 버튼 -> 모달 열기
+  // ★ 섹션 구성 버튼 -> 모달 (편집 모드에서만 버튼이 보임)
   document.getElementById('editSchema')?.addEventListener('click', ()=>{
     openSchemaEditor(db, programId, () => renderProgramPage(programId));
   });
@@ -467,5 +468,5 @@ async function renderProgramPage(programId){
     await Promise.all(tasks);
   }
 
-  applyEditMode(); // 초기: 보기 모드
+  applyEditMode(); // 초기: 보기 모드 (여기서 editSchema도 숨겨짐)
 }
