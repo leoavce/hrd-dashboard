@@ -104,7 +104,7 @@ async function renderHome(){
   });
 }
 
-/* ===== 상세(2 Cuts) ===== */
+/* ===== 상세(2 Cuts) + 섹션 스키마 ===== */
 async function renderProgramPage(programId, options = {}){
   const progRef = doc(db, 'programs', programId);
   const progSnap = await getDoc(progRef);
@@ -113,9 +113,11 @@ async function renderProgramPage(programId, options = {}){
     return;
   }
   const prog = { id: programId, ...progSnap.data() };
-  const [singleSnap, summarySnap] = await Promise.all([
+
+  const [singleSnap, summarySnap, schema] = await Promise.all([
     getDoc(doc(db,'programs',programId,'years','single')),
     getDoc(doc(db,'programs',programId,'meta','summary')),
+    getProgramSchema(db, programId)
   ]);
   const single  = singleSnap.exists() ? singleSnap.data() : { design:{ assetLinks:[] } };
   const summary = summarySnap.exists() ? summarySnap.data() : {};
@@ -151,7 +153,6 @@ async function renderProgramPage(programId, options = {}){
   // 편집 토글
   let editMode = !!options.resumeEdit;
   const applyEditMode = ()=>{
-    document.getElementById('editSchema')?.classList.toggle('hidden', !editMode);
     document.getElementById('toggleEdit').textContent = editMode ? '편집 종료' : '편집';
     updateWidgetEditMode(editMode);
     updateItemEditMode(editMode);
@@ -162,8 +163,16 @@ async function renderProgramPage(programId, options = {}){
     if(!ok) return;
     alert('저장 완료'); editMode = false; applyEditMode();
   });
-  document.getElementById('editSchema')?.addEventListener('click', ()=>{
-    openSchemaEditor(db, programId, () => renderProgramPage(programId, { resumeEdit:true }));
+
+  // 섹션 구성(체크박스 ON/OFF) → 저장 → 재렌더(편집 유지)
+  document.getElementById('editSchema').addEventListener('click', async ()=>{
+    await openSchemaEditor(db, programId, schema, async ()=>{
+      // 저장 후 최신 스키마로 갱신 렌더
+      const freshSchema = await getProgramSchema(db, programId);
+      await renderWidgetSection({ db, storage, programId, mount:document.getElementById('cut1-widgets'), summary, single, years, schema:freshSchema });
+      await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years, schema:freshSchema });
+      editMode = true; applyEditMode();
+    });
   });
 
   // 프로그램 삭제
@@ -184,9 +193,9 @@ async function renderProgramPage(programId, options = {}){
     }catch(e){ console.error(e); alert('삭제 중 오류'); }
   });
 
-  // 렌더
-  await renderWidgetSection({ db, storage, programId, mount:document.getElementById('cut1-widgets'), summary, single, years });
-  await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years });
+  // 최초 렌더
+  await renderWidgetSection({ db, storage, programId, mount:document.getElementById('cut1-widgets'), summary, single, years, schema });
+  await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years, schema });
 
   applyEditMode();
 }
