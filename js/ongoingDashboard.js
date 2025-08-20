@@ -1,271 +1,279 @@
 // js/ongoingDashboard.js
 import {
-  collection, getDocs, addDoc, doc, getDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp
+  collection, getDocs, doc, getDoc, setDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { openModal } from "./utils/modal.js";
 
 /**
- * 홈 상단 "진행/준비중 교육" 대시보드 초기화
- * - 컨테이너: #homeDashboard
- * - 데이터: Firestore collection 'ongoings'
- * - 기능:
- *   - 목록: 제목/기간 노출, 클릭 시 체크리스트 모달
- *   - 편집 토글: 항목 추가/제거/제목·기간 수정, 교육 삭제
- *   - 체크리스트: 체크/해제 즉시 저장(편집 모드와 무관), 항목 추가/삭제는 편집 모드에서만
+ * 홈 상단 "진행/준비중인 교육" 패널 초기화
+ * - 프로그램 목록 불러오고, 각 프로그램의 meta/ongoing.items[]를 합쳐서 렌더
+ * - 데이터 스키마:
+ *   programs/{programId}/meta/ongoing => { items: [ { id, title, from, to, checklist:[{id,text,done}] } ] }
  */
-export function initHomeDashboard(db) {
+export async function initHomeDashboard(db){
   const host = document.getElementById("homeDashboard");
-  if (!host) return;
+  if(!host) return;
 
-  // 스타일 1회 주입
-  if (!document.getElementById("od-style")) {
-    const css = document.createElement("style");
-    css.id = "od-style";
-    css.textContent = `
-      .od-wrap{background:#0e1629;border:1px solid #223053;border-radius:16px;padding:14px}
-      .od-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-      .od-title{font-size:16px;color:#eaf1ff;font-weight:700}
-      .od-btn{border:1px solid #223053;background:#162138;color:#eaf1ff;border-radius:10px;padding:6px 10px;cursor:pointer}
-      .od-btn.primary{background:#4ea3ff;color:#08142b;border-color:#4ea3ff}
-      .od-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
-      .od-card{background:#0b1426;border:1px solid #223053;border-radius:12px;padding:12px;cursor:pointer}
-      .od-card:hover{border-color:#35518a}
-      .od-name{font-weight:700;margin-bottom:4px;color:#eaf1ff}
-      .od-date{font-size:12px;color:#9bb0cf}
-      .od-badges{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
-      .od-badge{font-size:11px;border:1px solid #223053;border-radius:999px;padding:2px 8px;color:#9bb0cf}
+  // 데이터 로드
+  const programsSnap = await getDocs(collection(db, "programs"));
+  const programs = [];
+  programsSnap.forEach(d => programs.push({ id:d.id, ...d.data() }));
 
-      /* 모달 */
-      .od-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:9999}
-      .od-modal{width:min(760px,94vw);background:#11182b;border:1px solid #223053;border-radius:16px;box-shadow:0 24px 72px rgba(0,0,0,.5);color:#eaf1ff}
-      .od-hd{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #223053}
-      .od-hd .left{display:flex;gap:10px;align-items:center}
-      .od-hd input[type="text"], .od-hd input[type="date"]{background:#0b1426;border:1px solid #223053;color:#eaf1ff;border-radius:8px;padding:6px 8px}
-      .od-bd{display:grid;grid-template-columns:1fr;gap:10px;padding:14px 16px;max-height:70vh;overflow:auto}
-      .od-checklist{display:flex;flex-direction:column;gap:8px}
-      .od-item{display:flex;align-items:center;gap:8px;background:#0b1426;border:1px solid #223053;border-radius:10px;padding:8px}
-      .od-item input[type="text"]{flex:1;background:#0e1629;border:1px solid #223053;color:#eaf1ff;border-radius:8px;padding:6px 8px}
-      .od-item.done{opacity:.8}
-      .od-ft{display:flex;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid #223053}
-      .od-ft .left, .od-ft .right{display:flex;gap:8px}
-      .hidden{display:none !important}
-    `;
-    document.head.appendChild(css);
+  const allItems = [];
+  for (const p of programs){
+    const mref = doc(db, "programs", p.id, "meta", "ongoing");
+    const msnap = await getDoc(mref);
+    const items = msnap.exists() ? (msnap.data()?.items || []) : [];
+    items.forEach(it => allItems.push({
+      ...it,
+      programId: p.id,
+      programTitle: p.title || p.id,
+      emoji: p.emoji || "📘"
+    }));
   }
 
-  let editMode = false;
-  let list = [];
-
+  // 렌더
   host.innerHTML = `
-    <div class="od-wrap">
-      <div class="od-top">
-        <div class="od-title">진행/준비중인 교육</div>
-        <div>
-          <button id="odToggleEdit" class="od-btn">편집</button>
-          <button id="odAdd" class="od-btn primary hidden">추가</button>
+    <div class="panel">
+      <div class="panel-hd">
+        <h4>진행/준비중인 교육</h4>
+        <div class="row">
+          <button class="btn small ghost" id="odEdit">편집</button>
+          <button class="btn small" id="odAdd" style="display:none">추가</button>
         </div>
       </div>
-      <div id="odList" class="od-grid"></div>
+      <div class="chips" id="odChips">
+        ${allItems.length ? allItems.map(chipHTML).join("") : `
+          <div class="empty">등록된 진행/준비중 교육이 없습니다.</div>
+        `}
+      </div>
     </div>
   `;
 
-  document.getElementById('odToggleEdit').addEventListener('click', ()=>{
-    editMode = !editMode;
-    document.getElementById('odToggleEdit').textContent = editMode ? '편집 종료' : '편집';
-    document.getElementById('odAdd').classList.toggle('hidden', !editMode);
+  let edit = false;
+  const btnEdit = host.querySelector("#odEdit");
+  const btnAdd  = host.querySelector("#odAdd");
+  const chips   = host.querySelector("#odChips");
+
+  btnEdit.addEventListener("click", ()=>{
+    edit = !edit;
+    btnEdit.textContent = edit ? "편집 종료" : "편집";
+    btnAdd.style.display = edit ? "" : "none";
+    chips.querySelectorAll(".chip .chip-del").forEach(x => x.style.display = edit ? "" : "none");
   });
 
-  document.getElementById('odAdd').addEventListener('click', async ()=>{
-    const title = prompt('교육명'); if(!title) return;
-    const start = prompt('시작일 (YYYY-MM-DD)') || '';
-    const end   = prompt('종료일 (YYYY-MM-DD)') || '';
-    await addDoc(collection(db,'ongoings'), {
-      title, startDate: start, endDate: end,
-      checklist: [],
-      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-    });
-    await load();
+  btnAdd.addEventListener("click", async ()=>{
+    // 어떤 프로그램의 진행 건인지 선택 → 기본 값 생성
+    const prog = await pickProgram(programs);
+    if(!prog) return;
+
+    const payload = {
+      id: crypto.randomUUID(),
+      title: prog.title || "새 교육",
+      from: new Date().toISOString().slice(0,10),
+      to:   new Date().toISOString().slice(0,10),
+      checklist: [
+        { id: crypto.randomUUID(), text: "장소 확정",  done:false },
+        { id: crypto.randomUUID(), text: "강사 섭외",  done:false },
+        { id: crypto.randomUUID(), text: "디자인 확정", done:false },
+      ]
+    };
+    await upsertOngoing(db, prog.id, payload, "add");
+    // 칩 다시 그림
+    initHomeDashboard(db);
   });
 
-  async function load(){
-    const q = query(collection(db,'ongoings'), orderBy('startDate','asc'));
-    const snap = await getDocs(q);
-    list = [];
-    snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-    renderList();
-  }
-
-  function renderList(){
-    const grid = document.getElementById('odList');
-    if (!list.length) {
-      grid.innerHTML = `<div class="od-card" style="opacity:.8;cursor:default">등록된 진행/준비중 교육이 없습니다.</div>`;
-      return;
-    }
-    grid.innerHTML = list.map(item => {
-      const period = (item.startDate||'') + (item.endDate ? ` ~ ${item.endDate}` : '');
-      const doneCnt = (item.checklist || []).filter(i=>i.done).length;
-      const total = (item.checklist || []).length;
-      return `
-        <article class="od-card" data-id="${item.id}">
-          <div class="od-name">${item.title || '(제목 없음)'}</div>
-          <div class="od-date">${period || '기간 미정'}</div>
-          <div class="od-badges">
-            <span class="od-badge">${total ? `체크리스트 ${doneCnt}/${total}` : '체크리스트 없음'}</span>
-          </div>
-        </article>
-      `;
-    }).join('');
-
-    grid.querySelectorAll('.od-card').forEach(el=>{
-      el.addEventListener('click', ()=> openChecklistModal(el.dataset.id));
+  // 칩 인터랙션
+  chips.querySelectorAll(".chip").forEach(chip=>{
+    chip.addEventListener("click", (e)=>{
+      // 휴지통 클릭이면 삭제
+      if (e.target.closest(".chip-del")){
+        if(!confirm("이 항목을 삭제할까요?")) return;
+        const { programId, itemId } = chip.dataset;
+        removeOngoing(db, programId, itemId).then(()=> initHomeDashboard(db));
+        return;
+      }
+      // 상세 모달
+      const data = JSON.parse(chip.dataset.payload);
+      openDetailModal(db, data).then(saved=>{
+        if(saved) initHomeDashboard(db);
+      });
     });
-  }
+  });
+}
 
-  async function openChecklistModal(id){
-    const ref = doc(db,'ongoings', id);
-    const snap = await getDoc(ref);
-    if(!snap.exists()) return;
-    let data = snap.data();
+/* ---------- HTML ---------- */
+function chipHTML(it){
+  const period = it.from && it.to ? `${it.from} ~ ${it.to}` : "";
+  return `
+    <div class="chip" data-program-id="${it.programId}" data-item-id="${it.id}"
+         data-payload='${JSON.stringify(it).replace(/'/g,"&#39;")}'>
+      <div class="l">
+        <span class="emoji">${it.emoji || "📘"}</span>
+        <span class="title">${escapeHtml(it.title)}</span>
+        <span class="period">${period}</span>
+      </div>
+      <button class="chip-del" title="삭제" style="display:none">🗑</button>
+    </div>
+  `;
+}
 
-    const overlay = document.createElement('div');
-    overlay.className = 'od-overlay';
-    overlay.innerHTML = `
-      <div class="od-modal">
-        <div class="od-hd">
-          <div class="left">
-            <input id="odTitle" type="text" value="${data.title || ''}" ${editMode? '' : 'disabled'} />
-            <input id="odStart" type="date" value="${data.startDate || ''}" ${editMode? '' : 'disabled'} />
-            <input id="odEnd" type="date" value="${data.endDate || ''}" ${editMode? '' : 'disabled'} />
+/* ---------- 상세 모달 ---------- */
+async function openDetailModal(db, data){
+  return new Promise(resolve=>{
+    const ckList = data.checklist?.map(ck => lineHTML(ck)).join("") || "";
+    const content = `
+      <div class="od-detail">
+        <div class="od-row">
+          <label>교육명</label>
+          <input id="odTitle" value="${escapeHtml(data.title||"")}" />
+        </div>
+        <div class="od-row two">
+          <div>
+            <label>시작일</label>
+            <input id="odFrom" type="date" value="${data.from||""}">
           </div>
-          <div class="right">
-            <button id="odClose" class="od-btn">닫기</button>
+          <div>
+            <label>종료일</label>
+            <input id="odTo" type="date" value="${data.to||""}">
           </div>
         </div>
-        <div class="od-bd">
-          <div class="od-checklist" id="odChecklist"></div>
-          <div class="row" id="odAddRow" ${editMode? '' : 'style="display:none"'}>
-            <div class="od-item" style="border-style:dashed">
-              <input id="odNewText" type="text" placeholder="체크 항목 추가..." />
-              <button id="odAddItem" class="od-btn primary">추가</button>
-            </div>
+
+        <div class="od-row">
+          <div class="od-subhd">체크리스트</div>
+          <div id="ckBox" class="ck-list">
+            ${ckList || '<div class="muted">항목이 없습니다.</div>'}
           </div>
-        </div>
-        <div class="od-ft">
-          <div class="left">
-            <button id="odDelete" class="od-btn ${editMode? '' : 'hidden'}">교육 삭제</button>
-          </div>
-          <div class="right">
-            <button id="odSave" class="od-btn primary ${editMode? '' : 'hidden'}">변경사항 저장</button>
+          <div class="ck-add">
+            <input id="ckNew" placeholder="항목 추가" />
+            <button class="om-btn" id="ckAddBtn">추가</button>
           </div>
         </div>
       </div>
     `;
-    document.body.appendChild(overlay);
 
-    const checklistEl = overlay.querySelector('#odChecklist');
+    const ov = openModal({
+      title: `${data.emoji||"📘"} ${escapeHtml(data.programTitle||"")}`,
+      contentHTML: content,
+      footerHTML: `
+        <button class="om-btn" id="close">닫기</button>
+        <button class="om-btn primary" id="save">저장</button>`
+    });
 
-    function paintChecklist(){
-      const arr = data.checklist || [];
-      checklistEl.innerHTML = arr.map((it, idx)=>`
-        <div class="od-item ${it.done ? 'done' : ''}" data-idx="${idx}">
-          <input type="checkbox" class="odChk" ${it.done ? 'checked' : ''} />
-          ${editMode
-            ? `<input type="text" class="odText" value="${escapeHtml(it.text || '')}" />`
-            : `<div style="flex:1">${escapeHtml(it.text || '')}</div>`
-          }
-          ${editMode ? `<button class="od-btn odDel">삭제</button>` : ''}
-        </div>
-      `).join('');
+    // 체크 토글/삭제
+    const ckBox = ov.querySelector("#ckBox");
+    ckBox.addEventListener("click", (e)=>{
+      const row = e.target.closest(".ck-row");
+      if(!row) return;
+      const id = row.dataset.id;
 
-      // 토글(편집모드 여부와 무관하게 동작)
-      checklistEl.querySelectorAll('.odChk').forEach(box=>{
-        box.addEventListener('change', async (e)=>{
-          const idx = Number(box.closest('.od-item').dataset.idx);
-          const arr = [...(data.checklist || [])];
-          arr[idx] = { ...(arr[idx]||{}), done: !!e.target.checked };
-          data.checklist = arr;
-          await updateDoc(ref, { checklist: arr, updatedAt: serverTimestamp() });
-          paintChecklist();
-          // 리스트 카운트 갱신을 위해 전체 리로드
-          await load();
-        });
-      });
-
-      // 편집모드일 때만 텍스트/삭제 핸들러
-      if (editMode) {
-        checklistEl.querySelectorAll('.odText').forEach(inp=>{
-          inp.addEventListener('input', (e)=>{
-            const idx = Number(inp.closest('.od-item').dataset.idx);
-            const arr = [...(data.checklist || [])];
-            arr[idx] = { ...(arr[idx]||{}), text: e.target.value };
-            data.checklist = arr;
-          });
-        });
-        checklistEl.querySelectorAll('.odDel').forEach(btn=>{
-          btn.addEventListener('click', ()=>{
-            const idx = Number(btn.closest('.od-item').dataset.idx);
-            const arr = [...(data.checklist || [])];
-            arr.splice(idx,1);
-            data.checklist = arr;
-            paintChecklist();
-          });
-        });
+      // 삭제
+      if (e.target.closest(".ck-del")){
+        row.remove();
+        return;
       }
-    }
-
-    function escapeHtml(s){
-      return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    }
-
-    paintChecklist();
-
-    // 편집 입력들
-    const titleEl = overlay.querySelector('#odTitle');
-    const startEl = overlay.querySelector('#odStart');
-    const endEl   = overlay.querySelector('#odEnd');
-
-    if (editMode) {
-      titleEl.addEventListener('input', e => data.title = e.target.value);
-      startEl.addEventListener('change', e => data.startDate = e.target.value);
-      endEl.addEventListener('change', e => data.endDate = e.target.value);
-    }
-
-    // 항목 추가
-    overlay.querySelector('#odAddItem')?.addEventListener('click', ()=>{
-      const txt = overlay.querySelector('#odNewText').value.trim();
-      if (!txt) return;
-      const arr = [...(data.checklist || [])];
-      arr.push({ text: txt, done:false, ts: Date.now() });
-      data.checklist = arr;
-      overlay.querySelector('#odNewText').value = '';
-      paintChecklist();
+      // 토글
+      if (e.target.closest(".ck-box") || e.target.classList.contains("ck-text")){
+        row.classList.toggle("done");
+      }
     });
 
-    // 저장 (편집 모드 유지/종료는 대시보드 버튼이 제어)
-    overlay.querySelector('#odSave')?.addEventListener('click', async ()=>{
-      await updateDoc(ref, {
-        title: data.title || '',
-        startDate: data.startDate || '',
-        endDate: data.endDate || '',
-        checklist: data.checklist || [],
-        updatedAt: serverTimestamp()
-      });
-      alert('저장되었습니다.');
-      await load(); // 목록 갱신
+    // 추가
+    ov.querySelector("#ckAddBtn").addEventListener("click", ()=>{
+      const input = ov.querySelector("#ckNew");
+      const text = (input.value||"").trim();
+      if(!text) return;
+      input.value = "";
+      ckBox.insertAdjacentHTML("beforeend", lineHTML({ id: crypto.randomUUID(), text, done:false }));
     });
 
-    // 삭제
-    overlay.querySelector('#odDelete')?.addEventListener('click', async ()=>{
-      if (!confirm('이 교육을 삭제할까요?')) return;
-      await deleteDoc(ref);
-      overlay.remove();
-      await load();
-    });
+    ov.querySelector("#close").addEventListener("click", ()=>{ ov.remove(); resolve(false); });
+    ov.querySelector("#save").addEventListener("click", async ()=>{
+      // 수집/저장
+      const title = ov.querySelector("#odTitle").value.trim();
+      const from  = ov.querySelector("#odFrom").value || "";
+      const to    = ov.querySelector("#odTo").value   || "";
 
-    // 닫기
-    overlay.querySelector('#odClose').addEventListener('click', ()=> overlay.remove());
-    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) overlay.remove(); });
+      const checklist = Array.from(ov.querySelectorAll(".ck-row")).map(row => ({
+        id: row.dataset.id,
+        text: row.querySelector(".ck-text").textContent.trim(),
+        done: row.classList.contains("done")
+      }));
+
+      const payload = { ...data, title, from, to, checklist };
+      await upsertOngoing(db, data.programId, payload, "update");
+      ov.remove();
+      resolve(true);
+    });
+  });
+}
+
+function lineHTML(ck){
+  return `
+    <div class="ck-row ${ck.done?'done':''}" data-id="${ck.id}">
+      <span class="ck-box" aria-hidden="true"></span>
+      <span class="ck-text" contenteditable="true">${escapeHtml(ck.text||"")}</span>
+      <button class="ck-del" title="삭제">🗑</button>
+    </div>
+  `;
+}
+
+/* ---------- 데이터 IO ---------- */
+async function upsertOngoing(db, programId, item, mode){
+  const mref = doc(db, "programs", programId, "meta", "ongoing");
+  const msnap = await getDoc(mref);
+  const items = msnap.exists() ? (msnap.data()?.items || []) : [];
+
+  const idx = items.findIndex(x => x.id === item.id);
+  if (mode === "add" && idx === -1){
+    items.push(item);
+  } else if (mode === "update" && idx > -1){
+    items[idx] = item;
+  } else if (mode === "update" && idx === -1){
+    items.push(item);
   }
+  await setDoc(mref, { items, updatedAt: Date.now() }, { merge:true });
+}
 
-  // 최초 로드
-  load();
+async function removeOngoing(db, programId, itemId){
+  const mref = doc(db, "programs", programId, "meta", "ongoing");
+  const msnap = await getDoc(mref);
+  const items = msnap.exists() ? (msnap.data()?.items || []) : [];
+  const filtered = items.filter(x => x.id !== itemId);
+  await setDoc(mref, { items: filtered, updatedAt: Date.now() }, { merge:true });
+}
+
+/* ---------- 보조 ---------- */
+function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[m])); }
+
+/** 프로그램 선택 미니 모달 */
+async function pickProgram(programs){
+  return new Promise(resolve=>{
+    const listHTML = programs.map(p=>`
+      <button class="om-btn pick-prog" data-id="${p.id}" data-title="${escapeHtml(p.title||p.id)}" data-emoji="${p.emoji||"📘"}">
+        ${p.emoji||"📘"} ${escapeHtml(p.title||p.id)}
+      </button>
+    `).join("");
+    const ov = openModal({
+      title: "어느 프로그램에 추가할까요?",
+      contentHTML: `<div class="pick-grid">${listHTML}</div>`,
+      footerHTML: `<button class="om-btn" id="cancel">취소</button>`
+    });
+    ov.querySelector("#cancel").addEventListener("click", ()=>{ ov.remove(); resolve(null); });
+    ov.querySelectorAll(".pick-prog").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        ov.remove();
+        resolve({ id: btn.dataset.id, title: btn.dataset.title, emoji: btn.dataset.emoji });
+      });
+    });
+    // 스타일 주입
+    if(!document.getElementById("pick-style")){
+      const s=document.createElement("style"); s.id="pick-style";
+      s.textContent=`
+        .pick-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        @media(max-width:680px){ .pick-grid{ grid-template-columns:1fr; } }
+      `;
+      document.head.appendChild(s);
+    }
+  });
 }
