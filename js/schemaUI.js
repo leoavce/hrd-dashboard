@@ -1,157 +1,82 @@
 // js/schemaUI.js
-import { SECTION_DEFS, getProgramSchema, setProgramSchema } from "./programSchema.js";
+import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { openModal } from "./utils/modal.js";
+
+const WIDGET_CATALOG = [
+  { key:'summary', label:'교육 내용 전반 요약' },
+  { key:'budget',  label:'예산안 평균' },
+  { key:'outcome', label:'교육 성과 전반 요약' },
+  { key:'design',  label:'포함 디자인' }
+];
+const ITEM_CATALOG = [
+  { key:'content', label:'교육 내용' },
+  { key:'budget',  label:'교육 예산' },
+  { key:'outcome', label:'교육 성과' },
+  { key:'design',  label:'교육 디자인' }
+];
 
 /**
- * 스키마 편집 모달 열기
- * @param {*} db           Firestore 인스턴스
- * @param {string} pid     programId
- * @param {Function} onSaved 저장 후 콜백(예: 상세 페이지 재렌더)
+ * 스키마 편집 모달(체크박스 ON/OFF)
+ * onSaved: 저장완료 콜백
  */
-export async function openSchemaEditor(db, pid, onSaved) {
-  const current = await getProgramSchema(db, pid); // { sections: [...] }
-  const allIds = Object.keys(SECTION_DEFS);
+export async function openSchemaEditor(db, programId, currentSchema, onSaved){
+  const widgetsSel = new Set(currentSchema?.sections?.widgets || []);
+  const itemsSel   = new Set(currentSchema?.sections?.items   || []);
 
-  // 스타일 주입(1회)
-  if (!document.getElementById("schema-ui-style")) {
-    const style = document.createElement("style");
-    style.id = "schema-ui-style";
-    style.textContent = `
-    .schema-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999}
-    .schema-modal{width:min(680px,92vw);background:#11182b;border:1px solid #223053;border-radius:16px;color:#eaf1ff;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-    .schema-hd{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #223053}
-    .schema-bd{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 16px}
-    .schema-col{background:#0e1629;border:1px solid #223053;border-radius:12px;padding:12px}
-    .schema-col h4{margin:0 0 8px 0;font-size:14px;color:#8aa0c3}
-    .schema-list{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto}
-    .schema-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid #223053;border-radius:10px;background:#0b1426}
-    .schema-actions{display:flex;gap:6px}
-    .schema-actions button{border:1px solid #223053;background:#162138;color:#eaf1ff;border-radius:8px;padding:4px 8px;cursor:pointer}
-    .schema-ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #223053}
-    .schema-btn{border:none;background:#4ea3ff;color:#08142b;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:700}
-    .schema-btn.ghost{background:transparent;color:#eaf1ff;border:1px solid #223053}
-    label.schema-check{display:flex;align-items:center;gap:8px}
-    `;
-    document.head.appendChild(style);
-  }
-
-  // DOM 생성
-  const overlay = document.createElement("div");
-  overlay.className = "schema-overlay";
-  overlay.innerHTML = `
-    <div class="schema-modal">
-      <div class="schema-hd">
-        <strong>섹션 구성</strong>
-        <button id="schemaClose" class="schema-btn ghost">닫기</button>
-      </div>
-      <div class="schema-bd">
-        <div class="schema-col">
-          <h4>사용할 섹션 선택</h4>
-          <div class="schema-list" id="schemaAll"></div>
-        </div>
-        <div class="schema-col">
-          <h4>표시 순서</h4>
-          <div class="schema-list" id="schemaSelected"></div>
-        </div>
-      </div>
-      <div class="schema-ft">
-        <button id="schemaSave" class="schema-btn">저장</button>
-      </div>
+  const html = `
+    <div class="schema-grid">
+      <section>
+        <h4>Cut #1 — 위젯(전체 요약)</h4>
+        ${WIDGET_CATALOG.map(o=>`
+          <label class="ck">
+            <input type="checkbox" data-scope="widgets" value="${o.key}" ${widgetsSel.has(o.key)?'checked':''} />
+            <span>${o.label}</span>
+          </label>
+        `).join('')}
+      </section>
+      <section>
+        <h4>Cut #2 — 항목별 페이지</h4>
+        ${ITEM_CATALOG.map(o=>`
+          <label class="ck">
+            <input type="checkbox" data-scope="items" value="${o.key}" ${itemsSel.has(o.key)?'checked':''} />
+            <span>${o.label}</span>
+          </label>
+        `).join('')}
+      </section>
     </div>
+    <p class="muted" style="margin-top:8px">* 체크 해제하면 해당 카드/블록이 화면에서 숨겨집니다. (데이터는 보존)</p>
   `;
-  document.body.appendChild(overlay);
 
-  // 렌더 함수
-  function renderAll() {
-    const host = document.getElementById("schemaAll");
-    host.innerHTML = "";
-    allIds.forEach(id => {
-      const row = document.createElement("div");
-      row.className = "schema-item";
-      const checked = current.sections.includes(id);
-      row.innerHTML = `
-        <label class="schema-check">
-          <input type="checkbox" data-id="${id}" ${checked ? "checked" : ""}/>
-          ${SECTION_DEFS[id].title}
-        </label>
-        <div class="schema-actions">
-          <button data-act="add" data-id="${id}">추가</button>
-          <button data-act="remove" data-id="${id}">제거</button>
-        </div>
-      `;
-      host.appendChild(row);
-    });
-  }
-
-  function renderSelected() {
-    const host = document.getElementById("schemaSelected");
-    host.innerHTML = "";
-    current.sections.forEach((id, idx) => {
-      const row = document.createElement("div");
-      row.className = "schema-item";
-      row.innerHTML = `
-        <div>${SECTION_DEFS[id]?.title || id}</div>
-        <div class="schema-actions">
-          <button data-act="up" data-idx="${idx}">▲</button>
-          <button data-act="down" data-idx="${idx}">▼</button>
-          <button data-act="removeAt" data-idx="${idx}">삭제</button>
-        </div>
-      `;
-      host.appendChild(row);
-    });
-  }
-
-  renderAll();
-  renderSelected();
-
-  // 이벤트: 좌측 체크/추가/제거
-  document.getElementById("schemaAll").addEventListener("click", (e) => {
-    const t = e.target;
-    const id = t.dataset.id;
-    if (!id) return;
-    if (t.dataset.act === "add") {
-      if (!current.sections.includes(id)) current.sections.push(id);
-      renderAll(); renderSelected();
-    }
-    if (t.dataset.act === "remove") {
-      current.sections = current.sections.filter(s => s !== id);
-      renderAll(); renderSelected();
-    }
+  const ov = openModal({
+    title:'섹션 구성',
+    contentHTML: html,
+    footerHTML: `<button class="om-btn" id="cancel">취소</button>
+                 <button class="om-btn primary" id="save">저장</button>`
   });
 
-  document.getElementById("schemaAll").addEventListener("change", (e) => {
-    const t = e.target;
-    if (t.tagName !== "INPUT") return;
-    const id = t.dataset.id;
-    if (t.checked) {
-      if (!current.sections.includes(id)) current.sections.push(id);
-    } else {
-      current.sections = current.sections.filter(s => s !== id);
-    }
-    renderAll(); renderSelected();
+  ov.querySelector('#cancel').addEventListener('click', ()=> ov.remove());
+  ov.querySelector('#save').addEventListener('click', async ()=>{
+    const nextWidgets = Array.from(ov.querySelectorAll('input[data-scope="widgets"]:checked')).map(i=>i.value);
+    const nextItems   = Array.from(ov.querySelectorAll('input[data-scope="items"]:checked')).map(i=>i.value);
+    await setDoc(doc(db,'programs',programId,'meta','schema'), {
+      sections: { widgets: nextWidgets, items: nextItems }, updatedAt: Date.now()
+    }, { merge:true });
+    ov.remove();
+    if (typeof onSaved === 'function') onSaved();
   });
 
-  // 이벤트: 우측 순서/삭제
-  document.getElementById("schemaSelected").addEventListener("click", (e) => {
-    const t = e.target;
-    const idx = Number(t.dataset.idx);
-    if (Number.isNaN(idx)) return;
-    if (t.dataset.act === "up" && idx > 0) {
-      [current.sections[idx-1], current.sections[idx]] = [current.sections[idx], current.sections[idx-1]];
-    }
-    if (t.dataset.act === "down" && idx < current.sections.length - 1) {
-      [current.sections[idx+1], current.sections[idx]] = [current.sections[idx], current.sections[idx+1]];
-    }
-    if (t.dataset.act === "removeAt") {
-      current.sections.splice(idx, 1);
-    }
-    renderAll(); renderSelected();
-  });
+  injectStyle();
+}
 
-  // 저장/닫기
-  document.getElementById("schemaSave").addEventListener("click", async ()=>{
-    await setProgramSchema(db, pid, current.sections);
-    overlay.remove();
-    if (typeof onSaved === "function") onSaved(current.sections);
-  });
-  document.getElementById("schemaClose").addEventListener("click", ()=> overlay.remove());
+function injectStyle(){
+  if (document.getElementById('schema-style')) return;
+  const s = document.createElement('style'); s.id='schema-style';
+  s.textContent = `
+    .schema-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+    .schema-grid h4{ margin:0 0 10px; color:#eaf1ff; }
+    .schema-grid .ck{ display:flex; align-items:center; gap:10px; margin:8px 0; }
+    .schema-grid input[type="checkbox"]{ width:18px; height:18px; }
+    @media(max-width:720px){ .schema-grid{ grid-template-columns:1fr; } }
+  `;
+  document.head.appendChild(s);
 }
