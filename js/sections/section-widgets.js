@@ -7,8 +7,7 @@ let EDIT = false;
 export function updateWidgetEditMode(on){ EDIT = !!on; }
 
 export async function renderWidgetSection({ db, storage, programId, mount, summary, single, years }) {
-  ensureStyles();
-
+  ensureStyle();
   const yearMap = await loadYears(db, programId, years);
   const budgetAverages  = calcBudgetAverage(yearMap);
   const outcomeAverages = calcOutcomeAverage(yearMap);
@@ -16,8 +15,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
   const randomAssets = pickRandom(assets, 6);
 
   mount.innerHTML = `
-    <section class="sec sec-wg">
-      <div class="sec-hd"><h3>위젯 (전체 요약)</h3></div>
+    <div class="sec sec-wg">
       <div class="grid4">
         ${tile('교육 내용 전반 요약', `
           <ul class="bul">
@@ -48,19 +46,13 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
           </div>
         `,'openGallery')}
       </div>
-    </section>
+    </div>
   `;
 
-  // 상세 모달들
+  // 상세 모달
   mount.querySelector('[data-act="openSummary"]').addEventListener('click', ()=>{
-    const content = `
-      <textarea id="wgTxt" style="width:100%;min-height:280px" ${EDIT ? '' : 'readonly'}>${esc(summary?.widgetNote || '')}</textarea>
-    `;
-    const ov = openModal({
-      title:'교육 내용 전반 요약',
-      contentHTML:content,
-      footerHTML: EDIT ? `<button class="om-btn primary" id="wgSave">저장</button>` : ''
-    });
+    const content = `<textarea id="wgTxt" style="width:100%;min-height:280px" ${EDIT ? '' : 'readonly'}>${esc(summary?.widgetNote || '')}</textarea>`;
+    const ov = openModal({ title:'교육 내용 전반 요약', contentHTML:content, footerHTML: EDIT ? `<button class="om-btn primary" id="wgSave">저장</button>` : '' });
     ov.querySelector('#wgSave')?.addEventListener('click', async ()=>{
       const val = ov.querySelector('#wgTxt').value;
       await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote: val, updatedAt: Date.now() }, { merge:true });
@@ -78,11 +70,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       <div class="mini-table" style="margin-bottom:8px">
         <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(budgetAverages.totalAvg||0)} 원</b></div></div>
       </div>
-      <div class="tbl-wrap">
-        <table class="x-table">
-          ${rows.map((r,i)=>`<tr>${r.map((c)=> i===0? `<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}
-        </table>
-      </div>
+      <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
     `;
     openModal({ title:'예산안 평균 상세', contentHTML:content });
   });
@@ -99,21 +87,13 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         <div class="row"><div>CSAT 평균</div><div>${(outcomeAverages.csatAvg ?? 0).toFixed(1)}</div></div>
         <div class="row"><div>NPS 평균</div><div>${Math.round(outcomeAverages.npsAvg ?? 0)}</div></div>
       </div>
-      <div class="tbl-wrap">
-        <table class="x-table">
-          ${rows.map((r,i)=>`<tr>${r.map((c)=> i===0? `<th>${esc(c)}</th>`:`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}
-        </table>
-      </div>
+      <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
     `;
     openModal({ title:'교육 성과 전반 요약 상세', contentHTML:content });
   });
 
   mount.querySelector('[data-act="openGallery"]').addEventListener('click', ()=>{
-    const content = `
-      <div class="gal gal-lg">
-        ${(assets||[]).map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}
-      </div>
-    `;
+    const content = `<div class="gal gal-lg">${(assets||[]).map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
     openModal({ title:'포함 디자인 갤러리', contentHTML:content });
   });
 }
@@ -127,7 +107,6 @@ function tile(title, body, act){
     </article>
   `;
 }
-
 function calcBudgetAverage(ymap){
   let totals=[], itemsMap={};
   for(const y in ymap){
@@ -157,7 +136,7 @@ function calcOutcomeAverage(ymap){
   const avg = a => a.reduce((s,v)=>s+v,0)/(a.length||1);
   return { nAvg:avg(n), csatAvg:avg(cs), npsAvg:avg(np) };
 }
-function ensureStyles(){
+function ensureStyle(){
   if (document.getElementById('wg-style')) return;
   const s = document.createElement('style'); s.id='wg-style';
   s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
