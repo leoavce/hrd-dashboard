@@ -8,17 +8,19 @@ let EDIT = false;
 export function updateItemEditMode(on){ EDIT = !!on; }
 
 export async function renderItemSection({ db, storage, programId, mount, years }) {
-  ensureStyles();
+  ensureStyle();
   const data = await loadYears(db, programId, years);
 
   mount.innerHTML = `
-    <section class="sec">
-      <div class="sec-hd"><h3>항목별 페이지</h3></div>
+    <div class="sec">
       ${block('교육 내용','content')}
+      <div class="divider"></div>
       ${block('교육 예산','budget')}
+      <div class="divider"></div>
       ${block('교육 성과','outcome')}
+      <div class="divider"></div>
       ${block('교육 디자인','design')}
-    </section>
+    </div>
   `;
 
   initCarousel('content', renderContentCard);
@@ -30,6 +32,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
     const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
     let index = 0;
+    const clamp = v => Math.max(0, Math.min(years.length-3, v));
     function slice(){ const s = years.slice(index,index+3); return s.length?s:years.slice(Math.max(0,years.length-3)); }
     function paint(){
       const s = slice(); yBox.textContent = s.join('  |  ');
@@ -39,8 +42,8 @@ export async function renderItemSection({ db, storage, programId, mount, years }
         el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
       });
     }
-    mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index=Math.max(0,index-1); paint(); });
-    mount.querySelector(`[data-kind="${kind}"] .nav.next`).addEventListener('click', ()=>{ index=Math.min(years.length-3,index+1); paint(); });
+    mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index = clamp(index-1); paint(); });
+    mount.querySelector(`[data-kind="${kind}"] .nav.next`).addEventListener('click', ()=>{ index = clamp(index+1); paint(); });
     paint();
   }
 
@@ -113,7 +116,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
 
     if (kind==='outcome'){
       const s = v?.outcome?.surveySummary || {};
-      const kpis = (v?.outcome?.kpis||[]).map(x=>({ name:x.name||'', value:x.value||'', target:x.target||'', status:x.status||'' }));
+      const kpis     = (v?.outcome?.kpis||[]).map(x=>({ name:x.name||'', value:x.value||'', target:x.target||'', status:x.status||'' }));
       const insights = (v?.outcome?.insights||[]).map(x=>({ title:x.title||'', detail:x.detail||'' }));
 
       const html = `
@@ -248,6 +251,7 @@ function block(title, kind){
     </section>
   `;
 }
+
 function renderContentCard(y, v){
   const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
   return `
@@ -290,7 +294,8 @@ function renderDesignCard(y, v){
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
-function ensureStyles(){
+
+function ensureStyle(){
   if (document.getElementById('it-style')) return;
   const s = document.createElement('style'); s.id='it-style';
   s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
