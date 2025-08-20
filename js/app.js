@@ -11,7 +11,7 @@ import { initHomeDashboard } from "./ongoingDashboard.js";
 import { renderWidgetSection, updateWidgetEditMode } from "./sections/section-widgets.js";
 import { renderItemSection,   updateItemEditMode   } from "./sections/section-items.js";
 
-// ===== 접근 가드 =====
+/* ===== 인증 가드 ===== */
 onAuthStateChanged(auth, (user)=>{
   if(!user){ location.replace('index.html'); return; }
   boot();
@@ -29,7 +29,7 @@ async function boot(){
   route();
 }
 
-// ===== 라우팅 =====
+/* ===== 라우팅 ===== */
 const appEl = document.getElementById('app');
 function route(){
   const hash = location.hash || '#/home';
@@ -38,7 +38,7 @@ function route(){
   else { renderHome(); }
 }
 
-// ===== 시드 =====
+/* ===== 시드 ===== */
 const DEFAULT_PROGRAMS = [
   { id:'devconf', title:'개발자 컨퍼런스', emoji:'🧑‍💻' },
   { id:'ai-training', title:'AI 활용 교육', emoji:'🤖' },
@@ -64,7 +64,7 @@ async function ensureProgramsSeeded(){
   }
 }
 
-// ===== Home =====
+/* ===== 홈 ===== */
 async function renderHome(){
   appEl.innerHTML = `
     <section class="container">
@@ -74,7 +74,6 @@ async function renderHome(){
       </div>
 
       <section id="homeDashboard" style="margin-bottom:18px;"></section>
-
       <div id="cards" class="grid"></div>
     </section>
   `;
@@ -84,7 +83,7 @@ async function renderHome(){
   const snap = await getDocs(collection(db, 'programs'));
   const list = []; snap.forEach(d => list.push({ id:d.id, ...d.data() }));
   const cards = document.getElementById('cards');
-  cards.innerHTML = list.slice(0, 12).map(p => `
+  cards.innerHTML = list.slice(0,12).map(p => `
     <article class="card" data-id="${p.id}">
       <div class="emoji">${p.emoji || '📘'}</div>
       <div class="title">${p.title || p.id}</div>
@@ -105,7 +104,7 @@ async function renderHome(){
   });
 }
 
-// ===== 상세 (년도 페이지 제거 → 위젯 + 항목별만) =====
+/* ===== 상세(2 Cuts) ===== */
 async function renderProgramPage(programId, options = {}){
   const progRef = doc(db, 'programs', programId);
   const progSnap = await getDoc(progRef);
@@ -114,10 +113,9 @@ async function renderProgramPage(programId, options = {}){
     return;
   }
   const prog = { id: programId, ...progSnap.data() };
-  const [singleSnap, summarySnap, schema] = await Promise.all([
+  const [singleSnap, summarySnap] = await Promise.all([
     getDoc(doc(db,'programs',programId,'years','single')),
     getDoc(doc(db,'programs',programId,'meta','summary')),
-    getProgramSchema(db, programId)
   ]);
   const single  = singleSnap.exists() ? singleSnap.data() : { design:{ assetLinks:[] } };
   const summary = summarySnap.exists() ? summarySnap.data() : {};
@@ -135,11 +133,22 @@ async function renderProgramPage(programId, options = {}){
         </div>
       </div>
 
-      <div id="sec-widgets"></div>
-      <div id="sec-items"></div>
+      <!-- Cut #1: 위젯 -->
+      <section class="cut cut-1">
+        <div class="cut-hd">위젯 <span class="sub">(전체 요약)</span></div>
+        <div id="cut1-widgets"></div>
+      </section>
+
+      <!-- Cut #2: 항목별 페이지 -->
+      <section class="cut cut-2">
+        <div class="cut-hd">항목별 페이지</div>
+        <div class="divider"></div>
+        <div id="cut2-items"></div>
+      </section>
     </section>
   `;
 
+  // 편집 토글
   let editMode = !!options.resumeEdit;
   const applyEditMode = ()=>{
     document.getElementById('editSchema')?.classList.toggle('hidden', !editMode);
@@ -153,11 +162,11 @@ async function renderProgramPage(programId, options = {}){
     if(!ok) return;
     alert('저장 완료'); editMode = false; applyEditMode();
   });
-
   document.getElementById('editSchema')?.addEventListener('click', ()=>{
     openSchemaEditor(db, programId, () => renderProgramPage(programId, { resumeEdit:true }));
   });
 
+  // 프로그램 삭제
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
     const code = prompt('프로그램 삭제 확인 코드(ahnlabhr0315)'); if(code!=='ahnlabhr0315') return alert('코드 불일치');
     if(!confirm('정말 삭제할까요?')) return;
@@ -175,8 +184,9 @@ async function renderProgramPage(programId, options = {}){
     }catch(e){ console.error(e); alert('삭제 중 오류'); }
   });
 
-  await renderWidgetSection({ db, storage, programId, mount:document.getElementById('sec-widgets'), summary, single, years });
-  await renderItemSection  ({ db, storage, programId, mount:document.getElementById('sec-items'),   years });
+  // 렌더
+  await renderWidgetSection({ db, storage, programId, mount:document.getElementById('cut1-widgets'), summary, single, years });
+  await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years });
 
   applyEditMode();
 }
