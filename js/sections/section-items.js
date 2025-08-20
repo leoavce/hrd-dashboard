@@ -30,7 +30,6 @@ export async function renderItemSection({ db, storage, programId, mount, years }
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
     const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
     let index = 0;
-
     function slice(){ const s = years.slice(index,index+3); return s.length?s:years.slice(Math.max(0,years.length-3)); }
     function paint(){
       const s = slice(); yBox.textContent = s.join('  |  ');
@@ -45,16 +44,13 @@ export async function renderItemSection({ db, storage, programId, mount, years }
     paint();
   }
 
-  // 상세(편집 지원)
   async function openDetail(kind, y){
     const yRef = doc(db,'programs',programId,'years',y);
     const snap = await getDoc(yRef);
     const v = snap.exists()? snap.data(): {};
 
     if (kind==='content'){
-      const html = `
-        <textarea id="cOutline" style="width:100%;min-height:320px" ${EDIT?'':'readonly'}>${esc(v?.content?.outline||'')}</textarea>
-      `;
+      const html = `<textarea id="cOutline" style="width:100%;min-height:320px" ${EDIT?'':'readonly'}>${esc(v?.content?.outline||'')}</textarea>`;
       const ov = openModal({ title:`${y} 교육 내용 상세`, contentHTML: html, footerHTML: EDIT? `<button class="om-btn primary" id="save">저장</button>`:'' });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const val = ov.querySelector('#cOutline').value;
@@ -142,7 +138,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
       const paintKV = ()=>{
         const kpiBox = ov.querySelector('#kpiBox');
         kpiBox.innerHTML = kpis.map((k,i)=>`
-          <div class="kv">
+          <div class="kv" style="display:grid; grid-template-columns:1.2fr 1fr 1fr .8fr auto; gap:8px; margin-bottom:6px">
             ${EDIT?`<input class="inp" data-i="${i}" data-k="name"  value="${esc(k.name)}" placeholder="지표">`:`<b>${esc(k.name)}</b>`}
             ${EDIT?`<input class="inp" data-i="${i}" data-k="value" value="${esc(k.value)}" placeholder="값">`:`<span>${esc(k.value)}</span>`}
             ${EDIT?`<input class="inp" data-i="${i}" data-k="target" value="${esc(k.target)}" placeholder="목표">`:`<span>${esc(k.target)}</span>`}
@@ -153,7 +149,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
 
         const insBox = ov.querySelector('#insBox');
         insBox.innerHTML = insights.map((k,i)=>`
-          <div class="kv">
+          <div class="kv" style="display:grid; grid-template-columns:1fr 2fr auto; gap:8px; margin-bottom:6px">
             ${EDIT?`<input class="inp" data-i="${i}" data-k="title" value="${esc(k.title)}" placeholder="제목">`:`<b>${esc(k.title)}</b>`}
             ${EDIT?`<input class="inp" data-i="${i}" data-k="detail" value="${esc(k.detail)}" placeholder="내용">`:`<span>${esc(k.detail)}</span>`}
             ${EDIT?`<button class="om-btn delI" data-i="${i}">삭제</button>`:''}
@@ -179,9 +175,9 @@ export async function renderItemSection({ db, storage, programId, mount, years }
         const payload = {
           outcome:{
             surveySummary:{
-              n: Number(ov.querySelector('#oN').value||0),
-              csat: Number(ov.querySelector('#oC').value||0),
-              nps: Number(ov.querySelector('#oP').value||0)
+              n: Number(ov.querySelector('#oN')?.value||s.n||0),
+              csat: Number(ov.querySelector('#oC')?.value||s.csat||0),
+              nps: Number(ov.querySelector('#oP')?.value||s.nps||0)
             },
             kpis, insights
           },
@@ -211,9 +207,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
           ov.querySelectorAll('.delAsset').forEach(btn=>{
             btn.addEventListener('click', async ()=>{
               const url = btn.dataset.url;
-              try{
-                await deleteObject(ref(storage, url));
-              }catch(e){}
+              try{ await deleteObject(ref(storage, url)); }catch(e){}
               await updateDoc(yRef, { 'design.assetLinks': arrayRemove(url) });
               const idx = assets.indexOf(url); if (idx>-1) assets.splice(idx,1);
               repaint();
@@ -221,7 +215,6 @@ export async function renderItemSection({ db, storage, programId, mount, years }
           });
         }
       }
-
       ov.querySelector('#up')?.addEventListener('click', async ()=>{
         const files = Array.from(ov.querySelector('#f').files||[]);
         if (!files.length) return;
@@ -232,10 +225,8 @@ export async function renderItemSection({ db, storage, programId, mount, years }
           await updateDoc(yRef, { 'design.assetLinks': arrayUnion(url) });
           assets.push(url);
         }
-        repaint();
-        alert('업로드 완료');
+        repaint(); alert('업로드 완료');
       });
-
       repaint();
       return;
     }
@@ -257,7 +248,6 @@ function block(title, kind){
     </section>
   `;
 }
-
 function renderContentCard(y, v){
   const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
   return `
@@ -300,35 +290,10 @@ function renderDesignCard(y, v){
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
-
 function ensureStyles(){
   if (document.getElementById('it-style')) return;
   const s = document.createElement('style'); s.id='it-style';
-  s.textContent = `
-    .it-sec{margin:16px 0;background:#fff;border:1px solid var(--ahn-line);border-radius:12px;padding:12px}
-    .it-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:var(--ahn-text)}
-    .it-hd .l{font-weight:700}
-    .it-hd .r{display:flex;gap:8px;align-items:center}
-    .it-hd .nav{border:1px solid var(--ahn-line);background:var(--ahn-primary-weak);color:var(--ahn-text);border-radius:8px;padding:4px 8px;cursor:pointer}
-    .cards{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:10px}
-    @media (min-width:900px){ .cards{grid-template-columns:repeat(3,minmax(0,1fr));} }
-    .it-card{background:#fff;border:1px solid var(--ahn-line);border-radius:10px;padding:10px;display:flex;flex-direction:column}
-    .it-card .cap{font-weight:700;margin-bottom:6px;color:var(--ahn-text)}
-    .mini-table .row{display:grid;grid-template-columns:1fr auto;gap:8px;background:var(--ahn-surface-2);border:1px solid var(--ahn-line);border-radius:8px;padding:6px 8px;margin-bottom:6px}
-    .gal{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-    .gal .thumb{aspect-ratio:4/3;overflow:hidden;border-radius:8px;border:1px solid var(--ahn-line);background:var(--ahn-surface-2);display:flex;align-items:center;justify-content:center}
-    .gal .thumb img{width:100%;height:100%;object-fit:cover}
-    .bul{margin:0;padding-left:18px}
-    .ft{display:flex;justify-content:flex-end;margin-top:auto}
-    .btn.small{padding:4px 8px;border:1px solid var(--ahn-line);background:var(--ahn-primary-weak);color:var(--ahn-text);border-radius:8px;cursor:pointer}
-    .x-table{width:100%;border-collapse:collapse}
-    .x-table th,.x-table td{border-bottom:1px solid var(--ahn-line);padding:8px 10px;text-align:left;background:#fff}
-    .x-table thead th{position:sticky;top:0;background:#f7fbff}
-    .tbl-wrap{max-height:60vh;overflow:auto;border:1px solid var(--ahn-line);border-radius:8px}
-    input{background:#fff;border:1px solid var(--ahn-line);border-radius:8px;padding:6px 8px;color:var(--ahn-text);width:100%}
-    .kv{display:grid;grid-template-columns:1.2fr 1fr 1fr .8fr auto;gap:8px;margin-bottom:6px}
-    .muted{color:var(--ahn-muted)}
-  `;
+  s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
   document.head.appendChild(s);
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
