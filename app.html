@@ -3,21 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>HRD 대시보드</title>
+  <title>HRD Dashboard</title>
   <link rel="stylesheet" href="./css/styles.css" />
 </head>
-<body>
+<body class="dark">
   <header class="topbar">
     <div class="brand">HRD Dashboard</div>
-    <nav class="actions">
-      <span id="userEmail" class="muted"></span>
-      <button id="logoutBtn" class="btn outline" title="로그아웃">로그아웃</button>
-    </nav>
+    <div class="spacer"></div>
+    <div id="userEmail" class="muted"></div>
+    <button id="logoutBtn" class="btn ghost">로그아웃</button>
   </header>
-
-  <main id="app"></main>
-
-  <footer class="footer">© 2025 HRD Dashboard, copyright to AhnLab_HR_HRD</footer>
+  <div id="app"></div>
 
   <script type="module" src="./js/app.js"></script>
 </body>
