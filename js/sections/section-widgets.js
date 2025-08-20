@@ -51,7 +51,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     </section>
   `;
 
-  // 상세
+  // 상세 모달들
   mount.querySelector('[data-act="openSummary"]').addEventListener('click', ()=>{
     const content = `
       <textarea id="wgTxt" style="width:100%;min-height:280px" ${EDIT ? '' : 'readonly'}>${esc(summary?.widgetNote || '')}</textarea>
@@ -157,31 +157,10 @@ function calcOutcomeAverage(ymap){
   const avg = a => a.reduce((s,v)=>s+v,0)/(a.length||1);
   return { nAvg:avg(n), csatAvg:avg(cs), npsAvg:avg(np) };
 }
-
 function ensureStyles(){
   if (document.getElementById('wg-style')) return;
   const s = document.createElement('style'); s.id='wg-style';
-  s.textContent = `
-    .sec-wg .grid4{display:grid;gap:12px;grid-template-columns:repeat(1,minmax(0,1fr))}
-    @media (min-width:1100px){ .sec-wg .grid4{grid-template-columns:repeat(4,minmax(0,1fr));} }
-    .wg-card{background:#fff;border:1px solid var(--ahn-line);border-radius:12px;display:flex;flex-direction:column}
-    .wg-hd{padding:10px 12px;font-weight:700;color:var(--ahn-text);border-bottom:1px solid var(--ahn-line)}
-    .wg-bd{padding:12px;min-height:130px;color:var(--ahn-text)}
-    .wg-ft{display:flex;justify-content:flex-end;padding:8px 12px;border-top:1px solid var(--ahn-line)}
-    .btn.small{padding:4px 8px;border:1px solid var(--ahn-line);background:var(--ahn-primary-weak);color:var(--ahn-text);border-radius:8px;cursor:pointer}
-    .mini-table{display:grid;gap:6px}
-    .mini-table .row{display:grid;grid-template-columns:1fr auto;gap:8px;background:var(--ahn-surface-2);border:1px solid var(--ahn-line);border-radius:8px;padding:6px 8px}
-    .gal{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-    .gal .thumb{aspect-ratio:4/3;overflow:hidden;border-radius:8px;border:1px solid var(--ahn-line);background:var(--ahn-surface-2);display:flex;align-items:center;justify-content:center}
-    .gal .thumb img{width:100%;height:100%;object-fit:cover}
-    .gal-lg{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}
-    .muted{color:var(--ahn-muted)}
-    .bul{margin:0;padding-left:18px}
-    .tbl-wrap{max-height:60vh;overflow:auto;border:1px solid var(--ahn-line);border-radius:8px}
-    .x-table{width:100%;border-collapse:collapse}
-    .x-table th,.x-table td{border-bottom:1px solid var(--ahn-line);padding:8px 10px;text-align:left;background:#fff}
-    .x-table th{position:sticky;top:0;background:#f7fbff}
-  `;
+  s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
   document.head.appendChild(s);
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
