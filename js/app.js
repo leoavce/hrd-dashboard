@@ -438,7 +438,7 @@ async function renderProgramPage(programId, options = {}){
 
   // 삭제
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
-    const code = prompt('프로그램 삭제를 진행하려면 확인 코드(ahnlabhr0315)를 입력하세요.');
+    const code = prompt('프로그램 삭제를 진행하려면 확인 코드를 입력하세요.');
     if(code !== 'ahnlabhr0315'){ alert('코드가 일치하지 않습니다.'); return; }
     const ok = confirm('정말로 이 프로그램의 모든 데이터를 삭제할까요? (연도/요약/디자인 파일 포함, 복구 불가)');
     if(!ok) return;
