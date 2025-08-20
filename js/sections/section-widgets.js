@@ -1,4 +1,4 @@
-=// js/sections/section-widgets.js
+// js/sections/section-widgets.js
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { openModal } from "../utils/modal.js";
 import { loadYears, fmt, pickRandom } from "../utils/helpers.js";
@@ -8,6 +8,7 @@ export function updateWidgetEditMode(on){ EDIT = !!on; }
 
 /**
  * schema.sections.widgets = ['summary','budget','outcome','design'] 중 일부
+ * - 위젯 4장(요약/예산/성과/디자인) 중 켜진 것만 렌더
  */
 export async function renderWidgetSection({ db, storage, programId, mount, summary, single, years, schema }) {
   ensureStyle();
@@ -25,6 +26,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       ${(summary?.widgetNote || '교육 개요 요약을 입력하세요.').split('\n').slice(0,3).map(li=>`<li>${esc(li)}</li>`).join('')}
     </ul>
   `,'openSummary'));
+
   if (enabled.includes('budget')) tiles.push(tile('예산안 평균', `
     <div class="mini-table">
       <div class="row"><div>평균 총액</div><div>${fmt.format(budgetAverages.totalAvg || 0)} 원</div></div>
@@ -33,6 +35,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       `).join('')}
     </div>
   `,'openBudget'));
+
   if (enabled.includes('outcome')) tiles.push(tile('교육 성과 전반 요약', `
     <div class="mini-table">
       <div class="row"><div>응답 수 평균</div><div>${Math.round(outcomeAverages.nAvg || 0)} 명</div></div>
@@ -40,6 +43,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       <div class="row"><div>NPS 평균</div><div>${Math.round(outcomeAverages.npsAvg ?? 0)}</div></div>
     </div>
   `,'openOutcome'));
+
   if (enabled.includes('design')) tiles.push(tile('포함 디자인', `
     <div class="gal">
       ${randomAssets.map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">디자인 자산이 없습니다.</div>`}
@@ -48,7 +52,8 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
   mount.innerHTML = `<div class="sec sec-wg"><div class="grid4">${tiles.join('')}</div></div>`;
 
-  // 상세 모달 (기존 동일)
+  /* ===== 상세 모달들 ===== */
+  // 요약
   mount.querySelector('[data-act="openSummary"]')?.addEventListener('click', ()=>{
     const content = `<textarea id="wgTxt" style="width:100%;min-height:280px" ${EDIT ? '' : 'readonly'}>${esc(summary?.widgetNote || '')}</textarea>`;
     const ov = openModal({ title:'교육 내용 전반 요약', contentHTML:content, footerHTML: EDIT ? `<button class="om-btn primary" id="wgSave">저장</button>` : '' });
@@ -59,6 +64,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     });
   });
 
+  // 예산 평균 상세
   mount.querySelector('[data-act="openBudget"]')?.addEventListener('click', ()=>{
     const rows = [['연도','항목','금액(원)']];
     for (const y of years) {
@@ -74,6 +80,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     openModal({ title:'예산안 평균 상세', contentHTML:content });
   });
 
+  // 성과 평균 상세
   mount.querySelector('[data-act="openOutcome"]')?.addEventListener('click', ()=>{
     const rows = [['연도','응답수','CSAT','NPS']];
     for (const y of years) {
@@ -91,6 +98,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     openModal({ title:'교육 성과 전반 요약 상세', contentHTML:content });
   });
 
+  // 갤러리
   mount.querySelector('[data-act="openGallery"]')?.addEventListener('click', ()=>{
     const content = `<div class="gal gal-lg">${(assets||[]).map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
     openModal({ title:'포함 디자인 갤러리', contentHTML:content });
@@ -107,6 +115,7 @@ function tile(title, body, act){
     </article>
   `;
 }
+
 function calcBudgetAverage(ymap){
   let totals=[], itemsMap={};
   for(const y in ymap){
@@ -125,6 +134,7 @@ function calcBudgetAverage(ymap){
   const totalAvg = totals.reduce((s,v)=>s+v,0)/(totals.length||1);
   return { totalAvg, items: itemsAvg };
 }
+
 function calcOutcomeAverage(ymap){
   const n=[], cs=[], np=[];
   for(const y in ymap){
@@ -136,10 +146,12 @@ function calcOutcomeAverage(ymap){
   const avg = a => a.reduce((s,v)=>s+v,0)/(a.length||1);
   return { nAvg:avg(n), csatAvg:avg(cs), npsAvg:avg(np) };
 }
+
 function ensureStyle(){
   if (document.getElementById('wg-style')) return;
   const s = document.createElement('style'); s.id='wg-style';
   s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
   document.head.appendChild(s);
 }
+
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
