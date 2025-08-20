@@ -9,7 +9,7 @@ import {
   ref, uploadBytes, getDownloadURL, deleteObject, listAll
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
-// ★ 스키마 모듈 & UI
+// 스키마 모듈 & UI
 import { getProgramSchema, SECTION_DEFS, DEFAULT_SCHEMA } from "./programSchema.js";
 import { openSchemaEditor } from "./schemaUI.js";
 
@@ -115,7 +115,7 @@ async function renderHome(){
 }
 
 // ---------- 상세 (스키마 기반) ----------
-async function renderProgramPage(programId){
+async function renderProgramPage(programId, options = {}){
   const progRef = doc(db, 'programs', programId);
   const progSnap = await getDoc(progRef);
   if(!progSnap.exists()){
@@ -136,7 +136,7 @@ async function renderProgramPage(programId){
 
   const html = [];
 
-  // 툴바 (섹션 구성 버튼은 렌더하되 기본적으로 숨김 처리 -> 편집 모드에서만 표시)
+  // 툴바 (섹션 구성 버튼은 편집 모드에서만 보이도록 JS로 토글)
   html.push(`
     <section class="container">
       <div class="toolbar">
@@ -215,7 +215,8 @@ async function renderProgramPage(programId){
   appEl.innerHTML = html.join('\n');
 
   // === 편집 모드 ===
-  let editMode = false;
+  // 옵션으로 전달되면 편집 상태 복구
+  let editMode = !!options.resumeEdit;
   const toggleBtn = document.getElementById('toggleEdit');
 
   function applyEditMode() {
@@ -238,7 +239,7 @@ async function renderProgramPage(programId){
       el.classList.toggle('readonly', !editMode);
     });
 
-    // ★ 편집 모드에서만 노출할 버튼 목록에 'editSchema' 추가
+    // 편집 모드에서만 노출되는 버튼 (섹션 구성 포함)
     ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear','editSchema'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.classList.toggle('hidden', !editMode);
@@ -269,9 +270,36 @@ async function renderProgramPage(programId){
     }
   });
 
-  // ★ 섹션 구성 버튼 -> 모달 (편집 모드에서만 버튼이 보임)
+  // ★ 섹션 구성: 편집 모드에서만 버튼이 보임 + 저장 확인 + 편집 모드 유지
   document.getElementById('editSchema')?.addEventListener('click', ()=>{
-    openSchemaEditor(db, programId, () => renderProgramPage(programId));
+    openSchemaEditor(db, programId, () => {
+      // 저장 직후: 페이지 재렌더 + 편집 모드 유지
+      renderProgramPage(programId, { resumeEdit: true });
+    });
+
+    // 모달이 열린 뒤, 저장 버튼 클릭 가로채기(캡처 단계)로 확인 모달 추가
+    // 취소 시 전파/기본 동작 차단 -> schemaUI 내부 저장 핸들러 실행 안 됨
+    const interval = setInterval(()=>{
+      const saveBtn = document.getElementById('schemaSave');
+      const closeBtn = document.getElementById('schemaClose');
+      if (!saveBtn) return;
+      clearInterval(interval);
+
+      const guard = (e) => {
+        const ok = confirm('섹션 구성을 완료 및 저장하시겠습니까?');
+        if (!ok) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
+        // 확인 시에는 아무 것도 하지 않음 → schemaUI 쪽 저장 핸들러가 그대로 진행
+      };
+      saveBtn.addEventListener('click', guard, true);
+
+      // 모달 닫힐 때 가드 해제
+      const cleanup = ()=> { try{ saveBtn.removeEventListener('click', guard, true);}catch{} }
+      closeBtn?.addEventListener('click', cleanup, { once:true });
+      // 저장 후 모달이 제거되면 cleanup은 자연스럽게 완료되므로 추가 조치 불필요
+    }, 30);
   });
 
   // 디자인 자산 렌더/삭제
@@ -468,5 +496,6 @@ async function renderProgramPage(programId){
     await Promise.all(tasks);
   }
 
-  applyEditMode(); // 초기: 보기 모드 (여기서 editSchema도 숨겨짐)
+  // 초기 상태 적용 (옵션 기반으로 편집 유지 가능)
+  applyEditMode();
 }
