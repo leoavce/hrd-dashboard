@@ -129,9 +129,9 @@ async function renderProgramPage(programId, options = {}){
         <a class="link" href="#/home">← 목록</a>
         <h2>${prog.emoji || '📘'} ${prog.title}</h2>
         <div class="row">
-          <button id="editSchema" class="btn ghost">섹션 구성</button>
+          <button id="editSchema" class="btn ghost hidden">섹션 구성</button>
           <button id="toggleEdit" class="btn">편집</button>
-          <button id="deleteProgram" class="btn danger">프로그램 삭제</button>
+          <button id="deleteProgram" class="btn danger hidden">프로그램 삭제</button>
         </div>
       </div>
 
@@ -154,6 +154,9 @@ async function renderProgramPage(programId, options = {}){
   let editMode = !!options.resumeEdit;
   const applyEditMode = ()=>{
     document.getElementById('toggleEdit').textContent = editMode ? '편집 종료' : '편집';
+    // 섹션 구성 & 프로그램 삭제 버튼은 편집 중에만 노출
+    document.getElementById('editSchema').classList.toggle('hidden', !editMode);
+    document.getElementById('deleteProgram').classList.toggle('hidden', !editMode);
     updateWidgetEditMode(editMode);
     updateItemEditMode(editMode);
   };
@@ -164,10 +167,10 @@ async function renderProgramPage(programId, options = {}){
     alert('저장 완료'); editMode = false; applyEditMode();
   });
 
-  // 섹션 구성(체크박스 ON/OFF) → 저장 → 재렌더(편집 유지)
+  // 섹션 구성
   document.getElementById('editSchema').addEventListener('click', async ()=>{
-    await openSchemaEditor(db, programId, schema, async ()=>{
-      // 저장 후 최신 스키마로 갱신 렌더
+    const schemaNow = await getProgramSchema(db, programId);
+    await openSchemaEditor(db, programId, schemaNow, async ()=>{
       const freshSchema = await getProgramSchema(db, programId);
       await renderWidgetSection({ db, storage, programId, mount:document.getElementById('cut1-widgets'), summary, single, years, schema:freshSchema });
       await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years, schema:freshSchema });
@@ -175,7 +178,7 @@ async function renderProgramPage(programId, options = {}){
     });
   });
 
-  // 프로그램 삭제
+  // 프로그램 삭제(편집 중에만 활성화)
   document.getElementById('deleteProgram').addEventListener('click', async ()=>{
     const code = prompt('프로그램 삭제 확인 코드(ahnlabhr0315)'); if(code!=='ahnlabhr0315') return alert('코드 불일치');
     if(!confirm('정말 삭제할까요?')) return;
