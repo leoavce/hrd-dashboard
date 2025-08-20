@@ -174,9 +174,12 @@ async function openDetailModal(db, data, { editable }){
       });
       ov.querySelector("#ckAddBtn")?.addEventListener("click", ()=>{
         const input = ov.querySelector("#ckNew");
-        const text = (input.value||"").trim(); if(!text) return;
-        input.value = "";
-        ckBox.insertAdjacentHTML("beforeend", lineHTML({ id: crypto.randomUUID(), text, done:false }, true));
+        theText:
+        {
+          const text = (input.value||"").trim(); if(!text) break theText;
+          input.value = "";
+          ckBox.insertAdjacentHTML("beforeend", lineHTML({ id: crypto.randomUUID(), text, done:false }, true));
+        }
       });
     }else{
       // 읽기 전용일 때 텍스트 수정 금지
@@ -185,7 +188,6 @@ async function openDetailModal(db, data, { editable }){
 
     ov.querySelector("#close").addEventListener("click", ()=>{ ov.remove(); resolve(false); });
     ov.querySelector("#save")?.addEventListener("click", async ()=>{
-      // 편집 모드에서만 저장 버튼 존재
       const title = ov.querySelector("#odTitle").value.trim();
       const from  = ov.querySelector("#odFrom").value || "";
       const to    = ov.querySelector("#odTo").value   || "";
@@ -236,7 +238,11 @@ async function removeItem(db, programId, itemId){
 }
 
 /* ---------- 보조 ---------- */
-function esc(s){ return String(s||"").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[m])); }
+function esc(s){
+  return String(s||"").replace(/[&<>"']/g, m=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"
+  }[m]));
+}
 
 /** 프로그램 선택 미니 모달 */
 async function pickProgram(programs){
