@@ -146,6 +146,3 @@ body.login-page{
 .login-card .subtitle{ color:#b9c7dc; margin:6px 0 14px; }
 .login-card .form{ margin-top:10px; } .login-card .form label{ display:block; text-align:left; margin:12px 0; }
 .login-card .form input{ width:100%; } .login-card .btn{ width:100%; margin-top:8px; }
-
-/* Utils */
-.hidden{ display:none !important; }
