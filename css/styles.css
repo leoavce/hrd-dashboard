@@ -146,3 +146,17 @@ body.login-page{
 .login-card .subtitle{ color:#b9c7dc; margin:6px 0 14px; }
 .login-card .form{ margin-top:10px; } .login-card .form label{ display:block; text-align:left; margin:12px 0; }
 .login-card .form input{ width:100%; } .login-card .btn{ width:100%; margin-top:8px; }
+
+/* 체크리스트: 네이티브 체크박스 스타일 + 읽기/편집 구분 */
+.ck-list{ display:flex; flex-direction:column; gap:8px; }
+.ck-row{
+  display:grid; grid-template-columns:24px 1fr 36px; gap:10px; align-items:center;
+  background:#0f1929; border:1px solid var(--line); border-radius:10px; padding:8px 10px;
+}
+.ck-row input.ck-check{ width:18px; height:18px; accent-color:#3c79ff; }
+.ck-row .ck-text{ color:#eaf1ff; outline:none; }
+.ck-row.done .ck-text{ color:#c9dbff; text-decoration:line-through; }
+.ck-row .ck-del{
+  background:#172231; border:1px solid #2b3b55; color:#d3e2ff;
+  border-radius:8px; padding:4px 6px; cursor:pointer;
+}
