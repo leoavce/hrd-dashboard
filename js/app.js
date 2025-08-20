@@ -13,6 +13,9 @@ import {
 import { getProgramSchema, SECTION_DEFS, DEFAULT_SCHEMA } from "./programSchema.js";
 import { openSchemaEditor } from "./schemaUI.js";
 
+// ★ 신규: 진행중 교육 대시보드 모듈
+import { initHomeDashboard } from "./ongoingDashboard.js";
+
 // ---------- 접근 가드 ----------
 onAuthStateChanged(auth, (user)=>{
   if(!user){
@@ -83,10 +86,19 @@ async function renderHome(){
           <button id="addProg" class="btn">카테고리 추가</button>
         </div>
       </div>
+
+      <!-- ★ 진행/준비중 대시보드 영역 -->
+      <section id="homeDashboard" style="margin-bottom:12px;"></section>
+
       <div id="cards" class="grid"></div>
     </section>
   `;
   await ensureProgramsSeeded();
+
+  // ★ 홈 대시보드 초기화
+  initHomeDashboard(db);
+
+  // 프로그램 카드 렌더
   const snap = await getDocs(collection(db, 'programs'));
   const list = [];
   snap.forEach(d => list.push({ id:d.id, ...d.data() }));
@@ -136,7 +148,6 @@ async function renderProgramPage(programId, options = {}){
 
   const html = [];
 
-  // 툴바 (섹션 구성 버튼은 편집 모드에서만 보이도록 JS로 토글)
   html.push(`
     <section class="container">
       <div class="toolbar">
@@ -215,7 +226,6 @@ async function renderProgramPage(programId, options = {}){
   appEl.innerHTML = html.join('\n');
 
   // === 편집 모드 ===
-  // 옵션으로 전달되면 편집 상태 복구
   let editMode = !!options.resumeEdit;
   const toggleBtn = document.getElementById('toggleEdit');
 
@@ -239,7 +249,6 @@ async function renderProgramPage(programId, options = {}){
       el.classList.toggle('readonly', !editMode);
     });
 
-    // 편집 모드에서만 노출되는 버튼 (섹션 구성 포함)
     ['designFile','uploadDesign','saveItems','saveWidget','saveYear','clearYear','editSchema'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.classList.toggle('hidden', !editMode);
@@ -270,35 +279,23 @@ async function renderProgramPage(programId, options = {}){
     }
   });
 
-  // ★ 섹션 구성: 편집 모드에서만 버튼이 보임 + 저장 확인 + 편집 모드 유지
+  // 섹션 구성 모달 (저장 시 편집 유지)
   document.getElementById('editSchema')?.addEventListener('click', ()=>{
     openSchemaEditor(db, programId, () => {
-      // 저장 직후: 페이지 재렌더 + 편집 모드 유지
       renderProgramPage(programId, { resumeEdit: true });
     });
-
-    // 모달이 열린 뒤, 저장 버튼 클릭 가로채기(캡처 단계)로 확인 모달 추가
-    // 취소 시 전파/기본 동작 차단 -> schemaUI 내부 저장 핸들러 실행 안 됨
-    const interval = setInterval(()=>{
-      const saveBtn = document.getElementById('schemaSave');
-      const closeBtn = document.getElementById('schemaClose');
-      if (!saveBtn) return;
-      clearInterval(interval);
-
-      const guard = (e) => {
-        const ok = confirm('섹션 구성을 완료 및 저장하시겠습니까?');
-        if (!ok) {
-          e.stopPropagation();
-          e.preventDefault();
-        }
-        // 확인 시에는 아무 것도 하지 않음 → schemaUI 쪽 저장 핸들러가 그대로 진행
+    // 저장 확인 가드
+    const iv = setInterval(()=>{
+      const save = document.getElementById('schemaSave');
+      const close= document.getElementById('schemaClose');
+      if (!save) return;
+      clearInterval(iv);
+      const guard = (e)=>{
+        const ok = confirm('섹션 구성을 완료 및 저장하시겠습니까? (섹션 구성 변동 시 기존 내용 강제 초기화)');
+        if(!ok){ e.preventDefault(); e.stopPropagation(); }
       };
-      saveBtn.addEventListener('click', guard, true);
-
-      // 모달 닫힐 때 가드 해제
-      const cleanup = ()=> { try{ saveBtn.removeEventListener('click', guard, true);}catch{} }
-      closeBtn?.addEventListener('click', cleanup, { once:true });
-      // 저장 후 모달이 제거되면 cleanup은 자연스럽게 완료되므로 추가 조치 불필요
+      save.addEventListener('click', guard, true);
+      close?.addEventListener('click', ()=> save.removeEventListener('click', guard, true), { once:true });
     }, 30);
   });
 
@@ -496,6 +493,5 @@ async function renderProgramPage(programId, options = {}){
     await Promise.all(tasks);
   }
 
-  // 초기 상태 적용 (옵션 기반으로 편집 유지 가능)
   applyEditMode();
 }
