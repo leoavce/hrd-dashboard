@@ -7,26 +7,26 @@ import { openModal } from "../utils/modal.js";
 let EDIT = false;
 export function updateItemEditMode(on){ EDIT = !!on; }
 
-export async function renderItemSection({ db, storage, programId, mount, years }) {
+/**
+ * schema.sections.items = ['content','budget','outcome','design'] 중 일부
+ */
+export async function renderItemSection({ db, storage, programId, mount, years, schema }) {
   ensureStyle();
+  const enabled = (schema?.sections?.items || ['content','budget','outcome','design']);
   const data = await loadYears(db, programId, years);
 
-  mount.innerHTML = `
-    <div class="sec">
-      ${block('교육 내용','content')}
-      <div class="divider"></div>
-      ${block('교육 예산','budget')}
-      <div class="divider"></div>
-      ${block('교육 성과','outcome')}
-      <div class="divider"></div>
-      ${block('교육 디자인','design')}
-    </div>
-  `;
+  const blocks = [];
+  if (enabled.includes('content')) blocks.push(block('교육 내용','content'));
+  if (enabled.includes('budget'))  blocks.push(block('교육 예산','budget'));
+  if (enabled.includes('outcome')) blocks.push(block('교육 성과','outcome'));
+  if (enabled.includes('design'))  blocks.push(block('교육 디자인','design'));
 
-  initCarousel('content', renderContentCard);
-  initCarousel('budget',  renderBudgetCard);
-  initCarousel('outcome', renderOutcomeCard);
-  initCarousel('design',  renderDesignCard);
+  mount.innerHTML = `<div class="sec">${blocks.join('<div class="divider"></div>')}</div>`;
+
+  if (enabled.includes('content')) initCarousel('content', renderContentCard);
+  if (enabled.includes('budget'))  initCarousel('budget',  renderBudgetCard);
+  if (enabled.includes('outcome')) initCarousel('outcome', renderOutcomeCard);
+  if (enabled.includes('design'))  initCarousel('design',  renderDesignCard);
 
   function initCarousel(kind, renderer){
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
@@ -47,6 +47,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
     paint();
   }
 
+  /* ---- 상세/수정 모달 (기존 기능 유지) ---- */
   async function openDetail(kind, y){
     const yRef = doc(db,'programs',programId,'years',y);
     const snap = await getDoc(yRef);
@@ -236,6 +237,7 @@ export async function renderItemSection({ db, storage, programId, mount, years }
   }
 }
 
+/* ===== 블록/카드 렌더 ===== */
 function block(title, kind){
   return `
     <section class="it-sec" data-kind="${kind}">
@@ -251,7 +253,6 @@ function block(title, kind){
     </section>
   `;
 }
-
 function renderContentCard(y, v){
   const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
   return `
