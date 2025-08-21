@@ -31,12 +31,22 @@ async function boot(){
 
 /* ===== 라우팅 ===== */
 const appEl = document.getElementById('app');
+function parseQuery(qs){
+  const out = {};
+  (qs||'').replace(/^\?/,'').split('&').forEach(kv=>{
+    if(!kv) return;
+    const [k,v] = kv.split('=');
+    out[decodeURIComponent(k)] = decodeURIComponent(v||'');
+  });
+  return out;
+}
 function route(){
   const hash = location.hash || '#/home';
-  const [head, page, idAndQuery] = hash.split('/');
-  if(page === 'program' && idAndQuery){
-    const [id] = idAndQuery.split('?');
-    renderProgramPage(id);
+  const [_, page, rest] = hash.split('/');
+  if(page === 'program' && rest){
+    const [id, query] = rest.split('?');
+    const params = parseQuery(query);
+    renderProgramPage(id, { focus: params.focus, year: params.year });
   }else{
     renderHome();
   }
@@ -79,14 +89,16 @@ async function renderHome(){
 
       <section id="homeDashboard" style="margin-bottom:18px;"></section>
 
-      <!-- 검색 -->
-      <section class="panel" style="margin:12px 0;">
-        <div class="panel-hd" style="display:flex; align-items:center; gap:10px;">
-          <input id="searchInput" placeholder="예) 2023 개발자 컨퍼런스 예산" style="flex:1" />
-          <button class="btn" id="searchBtn">돋보기</button>
+      <!-- 검색 (구글 스타일 pill) -->
+      <section class="search-wrap">
+        <div class="search-bar">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27a6.471 6.471 0 0 0 1.57-4.23C15.99 6.01 13.98 4 11.49 4S7 6.01 7 9.5 9.01 15 11.5 15a6.5 6.5 0 0 0 4.23-1.57l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 .41-.41.41-1.08 0-1.49L15.5 14Zm-4 0C9.01 14 7 11.99 7 9.5S9.01 5 11.5 5 16 7.01 16 9.5 13.99 14 11.5 14Z"/></svg>
+          <input id="searchInput" class="search-input" placeholder="예) 2025 AI 활용 교육 예산" />
+          <button id="searchClear" class="search-clear" title="지우기">✕</button>
+          <button id="searchBtn" class="search-btn">검색</button>
         </div>
-        <div id="searchSuggest" class="small muted" style="margin-top:8px;"></div>
-        <div id="searchResults" style="margin-top:10px;"></div>
+        <div id="searchSuggest" class="search-suggest"></div>
+        <div id="searchResults" class="search-results"></div>
       </section>
 
       <div id="cards" class="grid"></div>
@@ -122,15 +134,21 @@ async function renderHome(){
 
   /* ====== 검색 ====== */
   const input = document.getElementById('searchInput');
-  const suggest = document.getElementById('searchSuggest');
-  const results = document.getElementById('searchResults');
+  const clearBtn = document.getElementById('searchClear');
+  const suggestEl = document.getElementById('searchSuggest');
+  const resultsEl = document.getElementById('searchResults');
 
   const index = buildSearchIndex(list);
 
   input.addEventListener('input', ()=>{
     const q = input.value.trim();
-    suggest.innerHTML = renderSuggestions(q, index).join(' ');
+    suggestEl.innerHTML = renderSuggestions(q, index)
+      .map(s => `<span class="sg" data-q="${s}">${s}</span>`).join('');
+    suggestEl.querySelectorAll('.sg').forEach(tag=>{
+      tag.addEventListener('click', ()=>{ input.value = tag.dataset.q; doSearch(); });
+    });
   });
+  clearBtn.addEventListener('click', ()=>{ input.value=''; suggestEl.innerHTML=''; resultsEl.innerHTML=''; });
 
   document.getElementById('searchBtn').addEventListener('click', ()=> doSearch());
   input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSearch(); });
@@ -139,57 +157,84 @@ async function renderHome(){
     const q = input.value.trim();
     const found = search(q, index);
     if(!found.length){
-      results.innerHTML = `<div class="muted small">검색 결과가 없습니다.</div>`;
+      resultsEl.innerHTML = `<div class="muted small">검색 결과가 없습니다.</div>`;
       return;
     }
-    results.innerHTML = found.map(r => `
-      <div class="card" style="cursor:pointer" data-id="${r.programId}">
+    resultsEl.innerHTML = found.map(r => `
+      <div class="search-card" data-id="${r.programId}" data-focus="${r.focus}" data-year="${r.year||''}">
         <div class="title">${r.programTitle}</div>
-        <div class="small muted">${r.label}</div>
+        <div class="badges">
+          <span class="badge">${r.sectionLabel}</span>
+          ${r.year ? `<span class="badge">${r.year}</span>` : ``}
+        </div>
       </div>
     `).join('');
-    results.querySelectorAll('.card').forEach(el=>{
+    resultsEl.querySelectorAll('.search-card').forEach(el=>{
       el.addEventListener('click', ()=>{
-        location.hash = `#/program/${el.dataset.id}`;
+        const id = el.dataset.id;
+        const focus = el.dataset.focus;
+        const year = el.dataset.year;
+        const q = `#/program/${id}?focus=${encodeURIComponent(focus)}${year?`&year=${encodeURIComponent(year)}`:''}`;
+        location.hash = q;
       });
     });
   }
 }
 
-/* 검색 인덱스/로직 */
+/* ===== 검색 인덱스/로직 ===== */
 function buildSearchIndex(programs){
   const years = ['2021','2022','2023','2024','2025','2026'];
+  // 섹션 키워드(동의어 포함) → 내부 focus 키
+  const sectionLex = [
+    { keys:['예산','비용','견적','budget'],  focus:'items:budget',  label:'예산' },
+    { keys:['성과','설문','만족도','csat','nps','outcome'], focus:'items:outcome', label:'성과' },
+    { keys:['디자인','배너','ppt','pdf','갤러리','design'],  focus:'items:design', label:'디자인' },
+    { keys:['내용','커리큘럼','아젠다','agenda','content'],   focus:'items:content', label:'교육 내용' },
+    // 필요시 위젯도 추가 가능: { keys:['위젯','요약'], focus:'widget:summary', label:'위젯 요약' }
+  ];
   return {
     programs: programs.map(p => ({ id:p.id, title:(p.title||p.id), titleLc:(p.title||p.id).toLowerCase() })),
-    years
+    years,
+    sectionLex
   };
 }
 function renderSuggestions(q, idx){
   if(!q) return [];
   const lc = q.toLowerCase();
   const ys = idx.years.filter(y => y.includes(q));
-  const ps = idx.programs.filter(p => p.titleLc.includes(lc)).slice(0,5).map(p=>p.title);
-  return [...ys, ...ps].map(s=>`<span class="btn small ghost">${s}</span>`);
+  const ps = idx.programs.filter(p => p.titleLc.includes(lc)).slice(0,4).map(p=>p.title);
+  const secs = idx.sectionLex.map(s=>s.keys[0]); // 대표 키워드
+  return [...ys, ...ps, ...secs].slice(0,8);
 }
+/** 질의 → [{programId, programTitle, focus, sectionLabel, year}] */
 function search(q, idx){
   const lc = q.toLowerCase();
   const year = idx.years.find(y => q.includes(y));
-  const program = idx.programs.find(p => p.titleLc.includes(lc));
-  const sectionMap = [
-    { key:'예산',   label:'예산 상세' },
-    { key:'성과',   label:'성과 상세' },
-    { key:'디자인', label:'디자인 상세' },
-    { key:'내용',   label:'교육 내용 상세' },
-  ];
-  const sec = sectionMap.find(s => q.includes(s.key));
-  const label = [
-    year ? `${year}년` : '',
-    program ? program.title : '',
-    sec ? sec.label : '상세 보기'
-  ].filter(Boolean).join(' · ');
-  if(program) return [{ programId: program.id, programTitle: program.title, label }];
-  // 프로그램을 찾지 못했으면 전체 프로그램으로 제안
-  return idx.programs.map(p=>({ programId:p.id, programTitle:p.title, label: year ? `${year}년 · ${p.title}` : p.title })).slice(0,6);
+  const programHits = idx.programs.filter(p => p.titleLc.includes(lc));
+  const secHit = idx.sectionLex.find(s => s.keys.some(k => lc.includes(k.toLowerCase())));
+
+  // 프로그램을 명시하지 않으면 모든 프로그램을 후보로
+  const base = programHits.length ? programHits : idx.programs;
+
+  // 섹션 매칭이 없으면 "모든 핵심 섹션"을 제안
+  const sections = secHit ? [secHit] : idx.sectionLex;
+
+  const out = [];
+  base.forEach(p=>{
+    sections.forEach(s=>{
+      out.push({
+        programId: p.id,
+        programTitle: p.title,
+        focus: s.focus,
+        sectionLabel: s.label,
+        year
+      });
+    });
+  });
+  // 중복 제거
+  const key = (r)=>`${r.programId}|${r.focus}|${r.year||''}`;
+  const seen = new Set();
+  return out.filter(r=>{ const k=key(r); if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,18);
 }
 
 /* ===== 상세(2 Cuts) + 섹션 스키마 ===== */
@@ -224,13 +269,13 @@ async function renderProgramPage(programId, options = {}){
       </div>
 
       <!-- Cut #1: 위젯 -->
-      <section class="cut cut-1">
+      <section class="cut cut-1" id="cut-widgets">
         <div class="cut-hd">위젯 <span class="sub">(전체 요약)</span></div>
         <div id="cut1-widgets"></div>
       </section>
 
       <!-- Cut #2: 항목별 페이지 -->
-      <section class="cut cut-2">
+      <section class="cut cut-2" id="cut-items">
         <div class="cut-hd">항목별 페이지</div>
         <div class="divider"></div>
         <div id="cut2-items"></div>
@@ -246,7 +291,6 @@ async function renderProgramPage(programId, options = {}){
 
   const applyEditMode = ()=>{
     btnEdit.textContent = editMode ? '편집 종료' : '편집';
-    // 편집 중에만 두 버튼 노출 (hidden 클래스 + display 제어 모두)
     [btnSchema, btnDel].forEach(el=>{
       el.classList.toggle('hidden', !editMode);
       el.style.display = editMode ? '' : 'none';
@@ -263,7 +307,7 @@ async function renderProgramPage(programId, options = {}){
     editMode = false; applyEditMode();
   });
 
-  // 섹션 구성(편집 중에만 표시되므로 안전)
+  // 섹션 구성
   btnSchema.addEventListener('click', async ()=>{
     const schemaNow = await getProgramSchema(db, programId);
     await openSchemaEditor(db, programId, schemaNow, async ()=>{
@@ -274,7 +318,7 @@ async function renderProgramPage(programId, options = {}){
     });
   });
 
-  // 프로그램 삭제(편집 중에만 활성화)
+  // 프로그램 삭제
   btnDel.addEventListener('click', async ()=>{
     const code = prompt('프로그램 삭제 확인 코드(ahnlabhr0315)'); if(code!=='ahnlabhr0315') return alert('코드가 일치하지 않습니다.');
     if(!confirm('정말 삭제할까요?')) return;
@@ -297,4 +341,16 @@ async function renderProgramPage(programId, options = {}){
   await renderItemSection  ({ db, storage, programId, mount:document.getElementById('cut2-items'),   years, schema });
 
   applyEditMode();
+
+  /* ===== 포커스 스크롤: 검색에서 넘어온 focus/year 처리 ===== */
+  if (options.focus){
+    // widget:* 은 위젯 컷, items:* 은 항목 컷으로 스크롤
+    const isWidget = String(options.focus).startsWith('widget:');
+    const targetCut = document.getElementById(isWidget ? 'cut-widgets' : 'cut-items');
+    if(targetCut){
+      targetCut.classList.add('focus-flash');
+      targetCut.scrollIntoView({ behavior:'smooth', block:'start' });
+      setTimeout(()=> targetCut.classList.remove('focus-flash'), 1700);
+    }
+  }
 }
