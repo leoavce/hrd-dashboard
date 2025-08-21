@@ -11,6 +11,10 @@ import { initHomeDashboard } from "./ongoingDashboard.js";
 import { renderWidgetSection, updateWidgetEditMode } from "./sections/section-widgets.js";
 import { renderItemSection,   updateItemEditMode   } from "./sections/section-items.js";
 
+/* ===== 공통 유틸(스니펫 안전 처리) ===== */
+const nf = new Intl.NumberFormat("ko-KR");
+const esc = (s)=> String(s ?? "").replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m]));
+
 /* ===== 인증 가드 ===== */
 onAuthStateChanged(auth, (user)=>{
   if(!user){ location.replace('index.html'); return; }
@@ -198,22 +202,47 @@ const SECTIONS = [
   { id:'widget:summary',label:'위젯(전체 요약)', keys:['위젯','요약','summary','overview'] },
 ];
 
-// 프로그램/연도 문서의 텍스트를 수집해 간단한 풀텍스트 인덱스 구성
+/* 인덱스 텍스트 생성기(사람-읽기 요약) */
+function summarizeBudget(budget){
+  const items = Array.isArray(budget?.items) ? budget.items : [];
+  const lines = items.slice(0,5).map(it=>{
+    const name = it?.name || '항목';
+    const subtotal = Number(it?.subtotal ?? ((+it?.unitCost||0) * (+it?.qty||0)));
+    return `${name} ${nf.format(subtotal)}원`;
+  });
+  const total = items.reduce((s,it)=> s + Number(it?.subtotal ?? ((+it?.unitCost||0) * (+it?.qty||0))), 0);
+  if (lines.length) lines.push(`합계 ${nf.format(total)}원`);
+  return lines.join(' · ');
+}
+function summarizeOutcome(outcome){
+  const s = outcome?.surveySummary || {};
+  const kpis = Array.isArray(outcome?.kpis) ? outcome.kpis.slice(0,3).map(k=>`${k?.name||''}:${k?.value||''}`).join(' · ') : '';
+  const insights = Array.isArray(outcome?.insights) ? outcome.insights.slice(0,2).map(i=>i?.title||'').join(' / ') : '';
+  const head = `응답수 ${s?.n||0}, CSAT ${s?.csat ?? '-'}, NPS ${s?.nps ?? '-'}`;
+  const tail = [kpis, insights].filter(Boolean).join(' · ');
+  return [head, tail].filter(Boolean).join(' — ');
+}
+function summarizeDesign(design){
+  const note = design?.note || '';
+  const count = Array.isArray(design?.assetLinks) ? design.assetLinks.length : 0;
+  const asset = count ? `이미지 ${count}개` : '';
+  return [note, asset].filter(Boolean).join(' · ');
+}
+
+// 프로그램/연도 문서의 텍스트를 수집해 간단한 풀텍스트 인덱스 구성 (JSON 노출 금지)
 async function buildSearchIndex(programs){
   const contents = [];
   for (const p of programs){
-    // 연도 문서(2021~2024 정도)를 긁어 단문 인덱스를 만든다
     for (const y of YEARS_POOL.slice(0,4)){ // 기본 2021~2024
       const yref = doc(db,'programs',p.id,'years',y);
       const ysnap = await getDoc(yref);
       if(!ysnap.exists()) continue;
       const v = ysnap.data() || {};
-      const pick = (s)=> (s||'').toString();
-      // 섹션별 텍스트
-      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:content', sectionLabel:'교육 내용', year:y, text: pick(v?.content?.outline) });
-      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:budget',  sectionLabel:'예산',     year:y, text: JSON.stringify(v?.budget||{}) });
-      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:outcome', sectionLabel:'성과',     year:y, text: [pick(v?.outcome?.analysis), JSON.stringify(v?.outcome?.surveySummary||{})].join(' ') });
-      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:design',  sectionLabel:'디자인',   year:y, text: [pick(v?.design?.note)].join(' ') });
+      // 섹션별 "사람-읽기 요약" 텍스트
+      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:content', sectionLabel:'교육 내용', year:y, text: (v?.content?.outline || '').toString() });
+      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:budget',  sectionLabel:'예산',     year:y, text: summarizeBudget(v?.budget) });
+      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:outcome', sectionLabel:'성과',     year:y, text: summarizeOutcome(v?.outcome) });
+      contents.push({ programId:p.id, programTitle:p.title||p.id, section:'items:design',  sectionLabel:'디자인',   year:y, text: summarizeDesign(v?.design) });
     }
   }
   return {
@@ -314,15 +343,20 @@ function search(q, idx){
 function makeSnippet(txt, q, span=80){
   const s = (txt||'').toString();
   if(!s) return '';
-  const i = s.toLowerCase().indexOf(q.toLowerCase());
-  if(i<0) return s.slice(0,span) + (s.length>span?'…':'');
+  const sEsc = esc(s); // 안전하게 이스케이프
+  const i = sEsc.toLowerCase().indexOf(esc(q).toLowerCase());
+  if(i<0){
+    const cut = sEsc.slice(0,span);
+    return cut + (sEsc.length>span?'…':'');
+  }
   const start = Math.max(0, i - Math.floor(span/2));
-  const end   = Math.min(s.length, start + span);
+  const end   = Math.min(sEsc.length, start + span);
   const head = start>0 ? '…' : '';
-  const tail = end<s.length ? '…' : '';
-  const mid  = s.slice(start, end);
+  const tail = end<sEsc.length ? '…' : '';
+  const mid  = sEsc.slice(start, end);
   // 하이라이트 <mark>
-  return head + mid.replace(new RegExp(q,'ig'), m=>`<mark>${m}</mark>`) + tail;
+  const regex = new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'ig');
+  return head + mid.replace(regex, m=>`<mark>${m}</mark>`) + tail;
 }
 
 /* ===== 상세(2 Cuts) + 섹션 스키마 ===== */
