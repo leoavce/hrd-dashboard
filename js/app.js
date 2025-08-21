@@ -93,7 +93,7 @@ async function renderHome(){
       <section class="search-wrap">
         <div class="search-bar">
           <svg class="search-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27a6.471 6.471 0 0 0 1.57-4.23C15.99 6.01 13.98 4 11.49 4S7 6.01 7 9.5 9.01 15 11.5 15a6.5 6.5 0 0 0 4.23-1.57l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 .41-.41.41-1.08 0-1.49L15.5 14Zm-4 0C9.01 14 7 11.99 7 9.5S9.01 5 11.5 5 16 7.01 16 9.5 13.99 14 11.5 14Z"/></svg>
-          <input id="searchInput" class="search-input" placeholder="예) 2025 AI 활용 교육 예산" />
+          <input id="searchInput" class="search-input" placeholder="예) 2023 개발자 컨퍼런스 예산" />
           <button id="searchClear" class="search-clear" title="지우기">✕</button>
           <button id="searchBtn" class="search-btn">검색</button>
         </div>
@@ -161,11 +161,12 @@ async function renderHome(){
       return;
     }
     resultsEl.innerHTML = found.map(r => `
-      <div class="search-card" data-id="${r.programId}" data-focus="${r.focus}" data-year="${r.year||''}">
-        <div class="title">${r.programTitle}</div>
+      <div class="search-card"
+           data-id="${r.programId}" data-focus="${r.focus}" data-year="${r.year||''}">
+        <div class="title">${r.title}</div>
         <div class="badges">
-          <span class="badge">${r.sectionLabel}</span>
           ${r.year ? `<span class="badge">${r.year}</span>` : ``}
+          <span class="badge">${r.sectionLabel}</span>
         </div>
       </div>
     `).join('');
@@ -182,59 +183,102 @@ async function renderHome(){
 }
 
 /* ===== 검색 인덱스/로직 ===== */
+/** 프로그램 목록 + 연도 풀 + 섹션(동의어 포함) 정의 */
 function buildSearchIndex(programs){
   const years = ['2021','2022','2023','2024','2025','2026'];
-  // 섹션 키워드(동의어 포함) → 내부 focus 키
-  const sectionLex = [
-    { keys:['예산','비용','견적','budget'],  focus:'items:budget',  label:'예산' },
-    { keys:['성과','설문','만족도','csat','nps','outcome'], focus:'items:outcome', label:'성과' },
-    { keys:['디자인','배너','ppt','pdf','갤러리','design'],  focus:'items:design', label:'디자인' },
-    { keys:['내용','커리큘럼','아젠다','agenda','content'],   focus:'items:content', label:'교육 내용' },
-    // 필요시 위젯도 추가 가능: { keys:['위젯','요약'], focus:'widget:summary', label:'위젯 요약' }
+  const sections = [
+    { id:'items:content', label:'교육 내용', keys:['내용','커리큘럼','아젠다','agenda','content'] },
+    { id:'items:budget',  label:'예산',     keys:['예산','비용','견적','budget'] },
+    { id:'items:outcome', label:'성과',     keys:['성과','설문','만족도','csat','nps','outcome'] },
+    { id:'items:design',  label:'디자인',   keys:['디자인','배너','ppt','pdf','갤러리','design'] },
+    { id:'widget:summary',label:'위젯(전체 요약)', keys:['위젯','요약','summary','overview'] },
   ];
   return {
-    programs: programs.map(p => ({ id:p.id, title:(p.title||p.id), titleLc:(p.title||p.id).toLowerCase() })),
-    years,
-    sectionLex
+    programs: programs.map(p => ({
+      id:p.id, title:(p.title||p.id),
+      titleLc:(p.title||p.id).toLowerCase()
+    })),
+    years, sections
   };
 }
+
 function renderSuggestions(q, idx){
   if(!q) return [];
   const lc = q.toLowerCase();
   const ys = idx.years.filter(y => y.includes(q));
   const ps = idx.programs.filter(p => p.titleLc.includes(lc)).slice(0,4).map(p=>p.title);
-  const secs = idx.sectionLex.map(s=>s.keys[0]); // 대표 키워드
-  return [...ys, ...ps, ...secs].slice(0,8);
+  const sec = idx.sections.map(s=>s.keys[0]);
+  return [...ys, ...ps, ...sec].slice(0,8);
 }
-/** 질의 → [{programId, programTitle, focus, sectionLabel, year}] */
+
+/**
+ * 사용 의도에 맞춰 결과를 "세부 보기 단위"로 생성
+ * - 섹션 키워드가 있으면: 해당 섹션 × (지정 연도 || 전체 연도) × (지정 프로그램 || 전체 프로그램)
+ * - 섹션 키워드가 없고 프로그램만 있으면: 그 프로그램의 4개 섹션 × 전체 연도
+ * - '위젯/요약'은 연도 없이 widget 요약 후보
+ */
 function search(q, idx){
   const lc = q.toLowerCase();
-  const year = idx.years.find(y => q.includes(y));
-  const programHits = idx.programs.filter(p => p.titleLc.includes(lc));
-  const secHit = idx.sectionLex.find(s => s.keys.some(k => lc.includes(k.toLowerCase())));
 
-  // 프로그램을 명시하지 않으면 모든 프로그램을 후보로
-  const base = programHits.length ? programHits : idx.programs;
+  // 매칭된 프로그램(없으면 전체)
+  const progHits = idx.programs.filter(p => p.titleLc.includes(lc));
+  const baseProgs = progHits.length ? progHits : idx.programs;
 
-  // 섹션 매칭이 없으면 "모든 핵심 섹션"을 제안
-  const sections = secHit ? [secHit] : idx.sectionLex;
+  // 연도 추출(복수 가능)
+  const years = idx.years.filter(y => q.includes(y));
+  const yearsUse = years.length ? years : idx.years.slice(0,4); // 기본 2021~2024
+
+  // 섹션 키워드 매칭
+  const secHit = idx.sections.find(s => s.keys.some(k => lc.includes(k.toLowerCase())));
+  const sectionsUse = secHit
+    ? [secHit]
+    : (progHits.length ? idx.sections.filter(s => s.id.startsWith('items:')) // 프로그램만 쳤을 때 4개 세부
+                       : []); // 아무것도 없으면 빈 배열 → 아래서 위젯 제안만
 
   const out = [];
-  base.forEach(p=>{
-    sections.forEach(s=>{
+
+  // 섹션이 지정된 경우 → 세부×연도×프로그램 단위
+  if(sectionsUse.length){
+    sectionsUse.forEach(sec=>{
+      if(sec.id.startsWith('widget:')){
+        baseProgs.forEach(p=>{
+          out.push({
+            programId: p.id,
+            title: `${p.title} · ${sec.label}`,
+            focus: sec.id,
+            sectionLabel: sec.label
+          });
+        });
+      }else{
+        baseProgs.forEach(p=>{
+          (yearsUse.length?yearsUse:[null]).forEach(y=>{
+            out.push({
+              programId: p.id,
+              title: `${p.title} · ${y||''} ${sec.label}`.trim(),
+              focus: sec.id,
+              sectionLabel: sec.label,
+              year: y||''
+            });
+          });
+        });
+      }
+    });
+  }else{
+    // 섹션 키워드 없음 → 위젯 요약도 제안
+    baseProgs.forEach(p=>{
       out.push({
         programId: p.id,
-        programTitle: p.title,
-        focus: s.focus,
-        sectionLabel: s.label,
-        year
+        title: `${p.title} · 위젯(전체 요약)`,
+        focus: 'widget:summary',
+        sectionLabel: '위젯(전체 요약)'
       });
     });
-  });
-  // 중복 제거
-  const key = (r)=>`${r.programId}|${r.focus}|${r.year||''}`;
+  }
+
+  // 중복 제거 + 상위 30개
+  const key = r => `${r.programId}|${r.focus}|${r.year||''}`;
   const seen = new Set();
-  return out.filter(r=>{ const k=key(r); if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,18);
+  return out.filter(r=>{ const k=key(r); if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,30);
 }
 
 /* ===== 상세(2 Cuts) + 섹션 스키마 ===== */
@@ -344,7 +388,6 @@ async function renderProgramPage(programId, options = {}){
 
   /* ===== 포커스 스크롤: 검색에서 넘어온 focus/year 처리 ===== */
   if (options.focus){
-    // widget:* 은 위젯 컷, items:* 은 항목 컷으로 스크롤
     const isWidget = String(options.focus).startsWith('widget:');
     const targetCut = document.getElementById(isWidget ? 'cut-widgets' : 'cut-items');
     if(targetCut){
@@ -352,5 +395,7 @@ async function renderProgramPage(programId, options = {}){
       targetCut.scrollIntoView({ behavior:'smooth', block:'start' });
       setTimeout(()=> targetCut.classList.remove('focus-flash'), 1700);
     }
+    // (선택) year 파라미터는 현재 카드 내부 네비게이션에 활용 가능.
+    // 필요하면 section-items.js 쪽에서 window.dispatchEvent로 받아 처리하도록 확장하세요.
   }
 }
