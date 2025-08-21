@@ -38,8 +38,13 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const s = slice(); yBox.textContent = s.join('  |  ');
       host.innerHTML = s.map(y=>`<article class="it-card" data-year="${y}"></article>`).join('');
       host.querySelectorAll('.it-card').forEach(el=>{
-        const y = el.dataset.year; el.innerHTML = renderer(y, data[y] || {});
-        el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
+        const y = el.dataset.year;
+        // renderer에 kind도 넘겨서 버튼 data-section 생성
+        el.innerHTML = renderer(kind, y, data[y] || {});
+        el.querySelector('.see-detail')?.addEventListener('click', (ev)=>{
+          const sec = ev.currentTarget?.dataset?.section || `items:${kind}`;
+          openDetail(sec.split(':')[1], y);
+        });
       });
     }
     mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index = clamp(index-1); paint(); });
@@ -235,6 +240,20 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       return;
     }
   }
+
+  /* ===== 외부 요청으로 상세 모달 열기 (검색 결과 → detail=1) ===== */
+  // 같은 화면에서 재렌더 시 중복 등록 방지
+  if (renderItemSection._detailListener){
+    window.removeEventListener('hrd:open-detail', renderItemSection._detailListener);
+  }
+  renderItemSection._detailListener = (e)=>{
+    const { section, year } = e.detail || {};
+    if(!section) return;
+    // section: 'items:content' 형태 → kind 추출
+    const kind = String(section).split(':')[1] || section;
+    openDetail(kind, year || '');
+  };
+  window.addEventListener('hrd:open-detail', renderItemSection._detailListener);
 }
 
 /* ===== 블록/카드 렌더 ===== */
@@ -253,15 +272,17 @@ function block(title, kind){
     </section>
   `;
 }
-function renderContentCard(y, v){
+function renderContentCard(kind, y, v){
   const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
   return `
     <div class="cap">${y}</div>
     <ul class="bul">${ol || '<li>내용 미입력</li>'}</ul>
-    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
+    <div class="ft">
+      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
+    </div>
   `;
 }
-function renderBudgetCard(y, v){
+function renderBudgetCard(kind, y, v){
   const items=(v?.budget?.items||[]).slice(0,3);
   const total = (v?.budget?.items||[]).reduce((s,it)=>s+(Number(it.subtotal)||0),0);
   return `
@@ -270,10 +291,12 @@ function renderBudgetCard(y, v){
       ${items.map(it=>`<div class="row"><div>${esc(it.name||'항목')}</div><div>${fmt.format(Number(it.subtotal||0))} 원</div></div>`).join('') || '<div class="muted">항목 없음</div>'}
       <div class="row"><div><strong>합계</strong></div><div><strong>${fmt.format(total)} 원</strong></div></div>
     </div>
-    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
+    <div class="ft">
+      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
+    </div>
   `;
 }
-function renderOutcomeCard(y, v){
+function renderOutcomeCard(kind, y, v){
   const s=v?.outcome?.surveySummary||{};
   const kpis=(v?.outcome?.kpis||[]).slice(0,2);
   return `
@@ -284,15 +307,19 @@ function renderOutcomeCard(y, v){
       <div class="row"><div>NPS</div><div>${s.nps??'-'}</div></div>
     </div>
     <ul class="bul" style="margin-top:6px">${kpis.map(k=>`<li>${esc(k.name||'')}: ${esc(k.value||'')}</li>`).join('')}</ul>
-    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
+    <div class="ft">
+      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
+    </div>
   `;
 }
-function renderDesignCard(y, v){
+function renderDesignCard(kind, y, v){
   const assets=(v?.design?.assetLinks||[]).slice(0,3);
   return `
     <div class="cap">${y}</div>
     <div class="gal">${assets.map(u=>`<div class="thumb"><img src="${u}"></div>`).join('') || '<div class="muted">자산 없음</div>'}</div>
-    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
+    <div class="ft">
+      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
+    </div>
   `;
 }
 
