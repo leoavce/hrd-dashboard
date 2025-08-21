@@ -87,8 +87,14 @@ export async function initHomeDashboard(db){
         return;
       }
       const data = JSON.parse(chip.dataset.payload);
-      openDetailModal(db, data, { editable: edit }).then(saved=>{
-        if(saved) initHomeDashboard(db);
+      openDetailModal(db, data, { editable: edit }).then(updated=>{
+        // updated가 truthy이면 최신 데이터가 반환됨 → 칩 즉시 갱신(재오픈시 체크 유지)
+        if(updated){
+          chip.dataset.payload = JSON.stringify(updated).replace(/'/g,"&#39;");
+          chip.querySelector('.title')?.replaceWith(Object.assign(document.createElement('span'),{className:'title',textContent:updated.title||''}));
+          const period = (updated.from && updated.to) ? `${updated.from} ~ ${updated.to}` : "";
+          chip.querySelector('.period')?.replaceWith(Object.assign(document.createElement('span'),{className:'period',textContent:period}));
+        }
       });
     });
   });
@@ -114,6 +120,7 @@ function chipHTML(it){
 /* ---------- 상세 모달 ---------- */
 async function openDetailModal(db, data, { editable }){
   return new Promise(resolve=>{
+    let latest = structuredClone(data); // 최신 상태를 모아 반환
     const ckHTML = (data.checklist || []).map(ck => lineHTML(ck, editable)).join("") || "";
     const content = `
       <div class="od-detail">
@@ -156,15 +163,16 @@ async function openDetailModal(db, data, { editable }){
         : `<button class="om-btn primary" id="close">닫기</button>`
     });
 
-    // 체크박스 토글 → 항상 허용 + 즉시 저장
+    // 체크박스 토글 → 항상 허용 + 즉시 저장 + 최신 상태 캐시에 반영
     const ckBox = ov.querySelector("#ckBox");
     ckBox.addEventListener("change", async (e)=>{
       const row = e.target.closest(".ck-row"); if(!row) return;
       if(!e.target.classList.contains("ck-check")) return;
       row.classList.toggle("done", e.target.checked);
+
       const checklist = collectChecklist(ov);
-      const payload = { ...data, checklist };
-      await upsert(db, data.programId, payload, "update");
+      latest = { ...latest, checklist };
+      await upsert(db, data.programId, latest, "update"); // 영속화
     });
 
     // 텍스트 편집/삭제/추가는 편집 모드에서만
@@ -187,15 +195,15 @@ async function openDetailModal(db, data, { editable }){
       ckBox.querySelectorAll(".ck-text").forEach(el=> el.setAttribute("contenteditable","false"));
     }
 
-    ov.querySelector("#close").addEventListener("click", ()=>{ ov.remove(); resolve(false); });
+    ov.querySelector("#close").addEventListener("click", ()=>{ ov.remove(); resolve(latest); });
     ov.querySelector("#save")?.addEventListener("click", async ()=>{
       const title = ov.querySelector("#odTitle").value.trim();
       const from  = ov.querySelector("#odFrom").value || "";
       const to    = ov.querySelector("#odTo").value   || "";
       const checklist = collectChecklist(ov);
-      const payload = { ...data, title, from, to, checklist };
-      await upsert(db, data.programId, payload, "update");
-      ov.remove(); resolve(true);
+      latest = { ...latest, title, from, to, checklist };
+      await upsert(db, data.programId, latest, "update");
+      ov.remove(); resolve(latest);
     });
   });
 }
@@ -245,7 +253,6 @@ function esc(s){
   }[m]));
 }
 
-/** 프로그램 선택 미니 모달 */
 async function pickProgram(programs){
   return new Promise(resolve=>{
     const listHTML = programs.map(p=>`
@@ -275,5 +282,3 @@ async function pickProgram(programs){
     }
   });
 }
-
-/*# sourceURL=js/ongoingDashboard.js */
