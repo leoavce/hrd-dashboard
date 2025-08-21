@@ -5,29 +5,30 @@ import {
 import { openModal } from "./utils/modal.js";
 
 /**
- * 홈 상단 "진행/준비중인 교육" 패널 초기화
- * - programs/*/meta/ongoing.items[] 수집하여 칩으로 표시
- * - 스키마: meta/ongoing => { items:[{ id,title,from,to, checklist:[{id,text,done}] }] }
+ * 홈 상단 "진행/준비중인 교육" 패널
+ * meta/ongoing.items[] 스키마:
+ * { id, title, from, to, checklist:[{id,text,done}] }
  */
 export async function initHomeDashboard(db){
   const host = document.getElementById("homeDashboard");
   if(!host) return;
 
-  // 프로그램/진행건 로드
+  // 프로그램 목록
   const pSnap = await getDocs(collection(db, "programs"));
   const programs = [];
-  pSnap.forEach(d => programs.push({ id:d.id, ...d.data() }));
+  pSnap.forEach(d => programs.push({ id: d.id, ...d.data() }));
 
+  // 진행/준비중 항목 수집
   const all = [];
   for (const p of programs){
-    const mref = doc(db,"programs",p.id,"meta","ongoing");
-    const ms = await getDoc(mref);
-    const items = ms.exists()? (ms.data()?.items||[]) : [];
+    const mref = doc(db, "programs", p.id, "meta", "ongoing");
+    const ms   = await getDoc(mref);
+    const items = ms.exists() ? (ms.data()?.items || []) : [];
     items.forEach(it => all.push({
       ...it,
       programId: p.id,
       programTitle: p.title || p.id,
-      emoji: p.emoji || "📘"
+      emoji: p.emoji || "📘",
     }));
   }
 
@@ -69,7 +70,7 @@ export async function initHomeDashboard(db){
       checklist: [
         { id: crypto.randomUUID(), text: "장소 확정",  done:false },
         { id: crypto.randomUUID(), text: "강사 섭외",  done:false },
-        { id: crypto.randomUUID(), text: "디자인 확정", done:false },
+        { id: crypto.randomUUID(), text: "디자인 확정", done:false }
       ]
     };
     await upsert(db, prog.id, payload, "add");
@@ -95,10 +96,11 @@ export async function initHomeDashboard(db){
 
 /* ---------- HTML ---------- */
 function chipHTML(it){
-  const period = it.from && it.to ? `${it.from} ~ ${it.to}` : "";
+  const period = (it.from && it.to) ? `${it.from} ~ ${it.to}` : "";
+  const payload = JSON.stringify(it).replace(/'/g,"&#39;");
   return `
     <div class="chip" data-program-id="${it.programId}" data-item-id="${it.id}"
-         data-payload='${JSON.stringify(it).replace(/'/g,"&#39;")}'>
+         data-payload='${payload}'>
       <div class="l">
         <span class="emoji">${it.emoji || "📘"}</span>
         <span class="title">${esc(it.title)}</span>
@@ -112,21 +114,21 @@ function chipHTML(it){
 /* ---------- 상세 모달 ---------- */
 async function openDetailModal(db, data, { editable }){
   return new Promise(resolve=>{
-    const ckHTML = (data.checklist||[]).map(ck => lineHTML(ck, editable)).join("") || "";
+    const ckHTML = (data.checklist || []).map(ck => lineHTML(ck, editable)).join("") || "";
     const content = `
       <div class="od-detail">
         <div class="od-row">
           <label>교육명</label>
-          <input id="odTitle" value="${esc(data.title||"")}" ${editable? "" : "readonly"}>
+          <input id="odTitle" value="${esc(data.title||"")}" ${editable ? "" : "readonly"}>
         </div>
         <div class="od-row two">
           <div>
             <label>시작일</label>
-            <input id="odFrom" type="date" value="${data.from||""}" ${editable? "" : "disabled"}>
+            <input id="odFrom" type="date" value="${data.from||""}" ${editable ? "" : "disabled"}>
           </div>
           <div>
             <label>종료일</label>
-            <input id="odTo" type="date" value="${data.to||""}" ${editable? "" : "disabled"}>
+            <input id="odTo" type="date" value="${data.to||""}" ${editable ? "" : "disabled"}>
           </div>
         </div>
 
@@ -146,7 +148,7 @@ async function openDetailModal(db, data, { editable }){
     `;
 
     const ov = openModal({
-      title: `${data.emoji||"📘"} ${esc(data.programTitle||"")}`,
+      title: `${data.emoji || "📘"} ${esc(data.programTitle || "")}`,
       contentHTML: content,
       footerHTML: editable
         ? `<button class="om-btn" id="close">닫기</button>
@@ -160,7 +162,6 @@ async function openDetailModal(db, data, { editable }){
       const row = e.target.closest(".ck-row"); if(!row) return;
       if(!e.target.classList.contains("ck-check")) return;
       row.classList.toggle("done", e.target.checked);
-      // 즉시 저장(체크만)
       const checklist = collectChecklist(ov);
       const payload = { ...data, checklist };
       await upsert(db, data.programId, payload, "update");
@@ -174,15 +175,15 @@ async function openDetailModal(db, data, { editable }){
       });
       ov.querySelector("#ckAddBtn")?.addEventListener("click", ()=>{
         const input = ov.querySelector("#ckNew");
-        theText:
-        {
-          const text = (input.value||"").trim(); if(!text) break theText;
-          input.value = "";
-          ckBox.insertAdjacentHTML("beforeend", lineHTML({ id: crypto.randomUUID(), text, done:false }, true));
-        }
+        const text = (input.value||"").trim();
+        if(!text) return;
+        input.value = "";
+        ckBox.insertAdjacentHTML(
+          "beforeend",
+          lineHTML({ id: crypto.randomUUID(), text, done:false }, true)
+        );
       });
     }else{
-      // 읽기 전용일 때 텍스트 수정 금지
       ckBox.querySelectorAll(".ck-text").forEach(el=> el.setAttribute("contenteditable","false"));
     }
 
@@ -201,15 +202,15 @@ async function openDetailModal(db, data, { editable }){
 
 function lineHTML(ck, editable){
   return `
-    <label class="ck-row ${ck.done?'done':''}" data-id="${ck.id}">
-      <input type="checkbox" class="ck-check" ${ck.done?'checked':''} />
-      <span class="ck-text" ${editable?'contenteditable="true"':''}>${esc(ck.text||"")}</span>
-      ${editable?`<button class="ck-del" title="삭제">🗑</button>`:''}
+    <label class="ck-row ${ck.done ? 'done' : ''}" data-id="${ck.id}">
+      <input type="checkbox" class="ck-check" ${ck.done ? 'checked' : ''} />
+      <span class="ck-text" ${editable ? 'contenteditable="true"' : ''}>${esc(ck.text||"")}</span>
+      ${editable ? `<button class="ck-del" title="삭제">🗑</button>` : ``}
     </label>
   `;
 }
 function collectChecklist(ov){
-  return Array.from(ov.querySelectorAll(".ck-row")).map(row=>({
+  return Array.from(ov.querySelectorAll(".ck-row")).map(row => ({
     id:   row.dataset.id,
     text: row.querySelector(".ck-text").textContent.trim(),
     done: row.querySelector(".ck-check").checked
@@ -239,7 +240,7 @@ async function removeItem(db, programId, itemId){
 
 /* ---------- 보조 ---------- */
 function esc(s){
-  return String(s||"").replace(/[&<>"']/g, m=>({
+  return String(s||"").replace(/[&<>"']/g, m => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"
   }[m]));
 }
@@ -265,10 +266,14 @@ async function pickProgram(programs){
       });
     });
     if(!document.getElementById("pick-style")){
-      const s=document.createElement("style"); s.id="pick-style";
-      s.textContent=`.pick-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-                      @media(max-width:680px){ .pick-grid{ grid-template-columns:1fr; } }`;
+      const s = document.createElement("style"); s.id = "pick-style";
+      s.textContent = `
+        .pick-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        @media(max-width:680px){ .pick-grid{ grid-template-columns:1fr; } }
+      `;
       document.head.appendChild(s);
     }
   });
 }
+
+/*# sourceURL=js/ongoingDashboard.js */
