@@ -38,13 +38,8 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const s = slice(); yBox.textContent = s.join('  |  ');
       host.innerHTML = s.map(y=>`<article class="it-card" data-year="${y}"></article>`).join('');
       host.querySelectorAll('.it-card').forEach(el=>{
-        const y = el.dataset.year;
-        // renderer에 kind도 넘겨서 버튼 data-section 생성
-        el.innerHTML = renderer(kind, y, data[y] || {});
-        el.querySelector('.see-detail')?.addEventListener('click', (ev)=>{
-          const sec = ev.currentTarget?.dataset?.section || `items:${kind}`;
-          openDetail(sec.split(':')[1], y);
-        });
+        const y = el.dataset.year; el.innerHTML = renderer(y, data[y] || {});
+        el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
       });
     }
     mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index = clamp(index-1); paint(); });
@@ -52,7 +47,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     paint();
   }
 
-  /* ---- 상세/수정 모달 (기존 기능 유지) ---- */
+  /* ---- 상세/수정 모달 (기존 기능 유지 + 업로드/업체 툴팁 추가) ---- */
   async function openDetail(kind, y){
     const yRef = doc(db,'programs',programId,'years',y);
     const snap = await getDoc(yRef);
@@ -70,11 +65,47 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     }
 
     if (kind==='budget'){
-      const items = (v?.budget?.items||[]).map(it=>({ name:it.name||'', unitCost:Number(it.unitCost||0), qty:Number(it.qty||0), subtotal:Number(it.subtotal||0), note:it.note||'' }));
+      // === 스키마 확장: vendor 정보 포함 ===
+      const coerce = (it)=>({
+        name: it?.name||'',
+        unitCost: Number(it?.unitCost||0),
+        qty: Number(it?.qty||0),
+        subtotal: Number(it?.subtotal||0),
+        note: it?.note||'',
+        vendor: {
+          name: it?.vendor?.name||'',
+          email: it?.vendor?.email||'',
+          phone: it?.vendor?.phone||'',
+          site:  it?.vendor?.site||'',
+          addr:  it?.vendor?.addr||'',
+        }
+      });
+      const items = (v?.budget?.items||[]).map(coerce);
+
       const html = `
+        <div class="importer ${EDIT?'':'hidden'}">
+          <div class="row wrap" style="gap:8px">
+            <input type="file" id="bdFile" accept=".csv,.xlsx,.xls">
+            <button class="om-btn" id="bdImport">파일 가져오기</button>
+            <span class="muted small">템플릿:
+              <button class="linklike" id="tplCsv">CSV</button> ·
+              <button class="linklike" id="tplXlsx">XLSX</button>
+            </span>
+          </div>
+          <div class="muted small" style="margin-top:6px">
+            열 헤더(한/영 혼용 가능): 항목(item) / 단가(unitCost) / 수량(qty) / 비고(note) /
+            업체(vendor) / email / phone / site(url) / address(주소)
+          </div>
+        </div>
+
         <div class="tbl-wrap">
           <table class="x-table" id="bdTbl">
-            <thead><tr><th>항목</th><th>단가</th><th>수량</th><th>소계</th><th>비고</th>${EDIT?'<th></th>':''}</tr></thead>
+            <thead>
+              <tr>
+                <th>항목</th><th>단가</th><th>수량</th><th>소계</th><th>비고</th>
+                <th>업체</th>${EDIT?'<th></th>':''}
+              </tr>
+            </thead>
             <tbody></tbody>
             <tfoot><tr><th colspan="3" style="text-align:right">합계</th><th id="bdTotal">0</th><th colspan="${EDIT?2:1}"></th></tr></tfoot>
           </table>
@@ -84,22 +115,41 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const ov = openModal({ title:`${y} 예산 상세`, contentHTML: html });
       const tbody = ov.querySelector('#bdTbl tbody'); const totalEl = ov.querySelector('#bdTotal');
 
+      const vendorChip = (v)=> v?.name
+        ? `<span class="v-chip" data-vendor='${encodeURIComponent(JSON.stringify(v))}'>${esc(v.name)}</span>`
+        : `<span class="muted small">-</span>`;
+
       const paint=()=>{
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
-        tbody.querySelectorAll('input').forEach(inp=>{
-          inp.addEventListener('input', ()=>{
-            const i = +inp.dataset.i, k = inp.dataset.k;
-            items[i][k] = (k==='name'||k==='note') ? inp.value : Number(inp.value||0);
-            items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
-            paint();
+        // 입력 핸들러
+        if (EDIT){
+          tbody.querySelectorAll('input[data-i]').forEach(inp=>{
+            inp.addEventListener('input', ()=>{
+              const i = +inp.dataset.i, k = inp.dataset.k;
+              if (k==='name' || k==='note'){ items[i][k] = inp.value; }
+              else { items[i][k] = Number(inp.value||0); }
+              items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
+              paint();
+            });
           });
-        });
-        tbody.querySelectorAll('.delRow')?.forEach(btn=>{
-          btn.addEventListener('click', ()=>{ const i=+btn.dataset.i; items.splice(i,1); paint(); });
-        });
+          tbody.querySelectorAll('.delRow')?.forEach(btn=>{
+            btn.addEventListener('click', ()=>{ const i=+btn.dataset.i; items.splice(i,1); paint(); });
+          });
+          tbody.querySelectorAll('.vEdit')?.forEach(btn=>{
+            btn.addEventListener('click', ()=> openVendorEditor(+btn.dataset.i));
+          });
+        }
+        // 합계
         const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
         totalEl.textContent = fmt.format(total);
+
+        // 툴팁(읽기/편집 상관없이 호버 노출)
+        tbody.querySelectorAll('.v-chip').forEach(ch=>{
+          const data = JSON.parse(decodeURIComponent(ch.dataset.vendor||'%7B%7D'));
+          attachVendorTip(ch, data);
+        });
       };
+
       const rowHTML=(it,i)=>`
         <tr>
           <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
@@ -107,16 +157,89 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           <td>${EDIT?`<input type="number" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
           <td>${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
           <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
+          <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
           ${EDIT?`<td><button class="om-btn delRow" data-i="${i}">삭제</button></td>`:''}
         </tr>`;
+
       paint();
 
-      ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:''}); paint(); });
+      // 행 추가/저장
+      ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}}); paint(); });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
-        const cleaned = items.map(it=>({ ...it, subtotal:(Number(it.unitCost)||0)*(Number(it.qty)||0) }));
+        const cleaned = items.map(it=>({
+          ...it,
+          subtotal:(Number(it.unitCost)||0)*(Number(it.qty)||0),
+          vendor: it.vendor || {}
+        }));
         await setDoc(yRef, { budget:{ items: cleaned }, updatedAt: Date.now() }, { merge:true });
         alert('저장되었습니다.'); ov.remove();
       });
+
+      // === 파일 가져오기 / 템플릿 ===
+      ov.querySelector('#bdImport')?.addEventListener('click', async ()=>{
+        const f = ov.querySelector('#bdFile')?.files?.[0];
+        if(!f){ alert('CSV 또는 XLSX 파일을 선택하세요.'); return; }
+        try{
+          const rows = await parseBudgetFile(f);
+          if(!rows.length){ alert('가져올 데이터가 없습니다.'); return; }
+          const replace = confirm('기존 행을 모두 대체할까요? (취소 = 뒤에 추가)');
+          if(replace) items.splice(0, items.length);
+          rows.forEach(r=>{
+            items.push({
+              name:r.name||'',
+              unitCost:Number(r.unitCost||0),
+              qty:Number(r.qty||0),
+              subtotal:(Number(r.unitCost)||0)*(Number(r.qty)||0),
+              note:r.note||'',
+              vendor:{
+                name:r.vendor?.name||r.vendor||'',
+                email:r.vendor?.email||r.email||'',
+                phone:r.vendor?.phone||r.phone||'',
+                site:r.vendor?.site||r.url||r.site||'',
+                addr:r.vendor?.addr||r.address||'',
+              }
+            });
+          });
+          paint();
+          alert('가져오기 완료');
+        }catch(e){
+          console.error(e); alert('가져오는 중 오류가 발생했습니다.');
+        }
+      });
+
+      ov.querySelector('#tplCsv')?.addEventListener('click', ()=> downloadBudgetTemplate('csv'));
+      ov.querySelector('#tplXlsx')?.addEventListener('click', ()=> downloadBudgetTemplate('xlsx'));
+
+      // 업체 편집 미니 모달
+      function openVendorEditor(i){
+        const cur = items[i].vendor || {};
+        const html = `
+          <div class="mini-form">
+            <label>업체명<input id="vName" value="${esc(cur.name||'')}"></label>
+            <label>Email<input id="vEmail" value="${esc(cur.email||'')}"></label>
+            <label>전화<input id="vPhone" value="${esc(cur.phone||'')}"></label>
+            <label>웹사이트<input id="vSite" value="${esc(cur.site||'')}"></label>
+            <label>주소<input id="vAddr" value="${esc(cur.addr||'')}"></label>
+          </div>
+        `;
+        const mv = openModal({
+          title:'업체 정보',
+          contentHTML:html,
+          footerHTML:`<button class="om-btn" id="close">닫기</button><button class="om-btn primary" id="ok">적용</button>`
+        });
+        mv.querySelector('#close').addEventListener('click', ()=> mv.remove());
+        mv.querySelector('#ok').addEventListener('click', ()=>{
+          items[i].vendor = {
+            name: mv.querySelector('#vName').value.trim(),
+            email: mv.querySelector('#vEmail').value.trim(),
+            phone: mv.querySelector('#vPhone').value.trim(),
+            site:  mv.querySelector('#vSite').value.trim(),
+            addr:  mv.querySelector('#vAddr').value.trim(),
+          };
+          mv.remove(); paint();
+        });
+      }
+
       return;
     }
 
@@ -240,20 +363,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       return;
     }
   }
-
-  /* ===== 외부 요청으로 상세 모달 열기 (검색 결과 → detail=1) ===== */
-  // 같은 화면에서 재렌더 시 중복 등록 방지
-  if (renderItemSection._detailListener){
-    window.removeEventListener('hrd:open-detail', renderItemSection._detailListener);
-  }
-  renderItemSection._detailListener = (e)=>{
-    const { section, year } = e.detail || {};
-    if(!section) return;
-    // section: 'items:content' 형태 → kind 추출
-    const kind = String(section).split(':')[1] || section;
-    openDetail(kind, year || '');
-  };
-  window.addEventListener('hrd:open-detail', renderItemSection._detailListener);
 }
 
 /* ===== 블록/카드 렌더 ===== */
@@ -272,31 +381,29 @@ function block(title, kind){
     </section>
   `;
 }
-function renderContentCard(kind, y, v){
+function renderContentCard(y, v){
   const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
   return `
     <div class="cap">${y}</div>
     <ul class="bul">${ol || '<li>내용 미입력</li>'}</ul>
-    <div class="ft">
-      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
-    </div>
+    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
-function renderBudgetCard(kind, y, v){
+function renderBudgetCard(y, v){
   const items=(v?.budget?.items||[]).slice(0,3);
   const total = (v?.budget?.items||[]).reduce((s,it)=>s+(Number(it.subtotal)||0),0);
+  // 카드 내부에서도 업체칩 title로 간단 툴팁 제공
+  const vendorBadge = (ven)=> ven?.name ? `<span class="mini-badge" title="${[ven.email,ven.site].filter(Boolean).join(' | ')}">${esc(ven.name)}</span>` : '';
   return `
     <div class="cap">${y}</div>
     <div class="mini-table">
-      ${items.map(it=>`<div class="row"><div>${esc(it.name||'항목')}</div><div>${fmt.format(Number(it.subtotal||0))} 원</div></div>`).join('') || '<div class="muted">항목 없음</div>'}
+      ${items.map(it=>`<div class="row"><div>${esc(it.name||'항목')} ${vendorBadge(it.vendor)}</div><div>${fmt.format(Number(it.subtotal||0))} 원</div></div>`).join('') || '<div class="muted">항목 없음</div>'}
       <div class="row"><div><strong>합계</strong></div><div><strong>${fmt.format(total)} 원</strong></div></div>
     </div>
-    <div class="ft">
-      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
-    </div>
+    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
-function renderOutcomeCard(kind, y, v){
+function renderOutcomeCard(y, v){
   const s=v?.outcome?.surveySummary||{};
   const kpis=(v?.outcome?.kpis||[]).slice(0,2);
   return `
@@ -307,26 +414,169 @@ function renderOutcomeCard(kind, y, v){
       <div class="row"><div>NPS</div><div>${s.nps??'-'}</div></div>
     </div>
     <ul class="bul" style="margin-top:6px">${kpis.map(k=>`<li>${esc(k.name||'')}: ${esc(k.value||'')}</li>`).join('')}</ul>
-    <div class="ft">
-      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
-    </div>
+    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
-function renderDesignCard(kind, y, v){
+function renderDesignCard(y, v){
   const assets=(v?.design?.assetLinks||[]).slice(0,3);
   return `
     <div class="cap">${y}</div>
     <div class="gal">${assets.map(u=>`<div class="thumb"><img src="${u}"></div>`).join('') || '<div class="muted">자산 없음</div>'}</div>
-    <div class="ft">
-      <button class="btn small see-detail" data-section="items:${kind}" data-year="${y}">상세 보기</button>
-    </div>
+    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
 
+/* ===== 파일 파서 & 템플릿 ===== */
+function headerMap(h){
+  const key = h.trim().toLowerCase();
+  // 한국어/영문/동의어 매핑
+  if (/(항목|품목|item|name)/.test(key)) return 'name';
+  if (/(단가|금액|unit.?cost|price)/.test(key)) return 'unitCost';
+  if (/(수량|qty|quantity)/.test(key)) return 'qty';
+  if (/(비고|메모|note|remark)/.test(key)) return 'note';
+  if (/(업체|공급처|vendor|company)/.test(key)) return 'vendor';
+  if (/(email|메일)/.test(key)) return 'email';
+  if (/(phone|tel|전화)/.test(key)) return 'phone';
+  if (/(site|url|website|웹사이트)/.test(key)) return 'url';
+  if (/(address|addr|주소)/.test(key)) return 'address';
+  return null;
+}
+
+async function parseBudgetFile(file){
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  if (ext === 'csv'){
+    const text = await file.text();
+    return parseCSV(text);
+  }
+  if (ext === 'xlsx' || ext === 'xls'){
+    // 동적 import → 실패 시 에러 throw
+    let XLSX = (globalThis.XLSX)||null;
+    if(!XLSX){
+      try{
+        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default;
+      }catch(e){
+        console.warn('XLSX 모듈 로드 실패, CSV만 지원됩니다.'); throw new Error('XLSX 모듈 로드 실패');
+      }
+    }
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const arr = XLSX.utils.sheet_to_json(ws, { header:1 }); // 2차원 배열
+    return rowsFromAOA(arr);
+  }
+  throw new Error('지원하지 않는 형식');
+}
+
+function parseCSV(text){
+  const rows = text.split(/\r?\n/).filter(Boolean).map(line=>{
+    // 단순 CSV 파서(따옴표 처리 최소)
+    const cells = [];
+    let cur = '', inQ=false;
+    for (let i=0;i<line.length;i++){
+      const ch = line[i];
+      if (ch === '"' ){ if (inQ && line[i+1]==='"'){ cur+='"'; i++; } else { inQ=!inQ; } }
+      else if (ch === ',' && !inQ){ cells.push(cur); cur=''; }
+      else { cur+=ch; }
+    }
+    cells.push(cur);
+    return cells.map(s=>s.trim());
+  });
+  return rowsFromAOA(rows);
+}
+
+function rowsFromAOA(rows){
+  if(!rows.length) return [];
+  const head = rows[0].map(headerMap);
+  return rows.slice(1).filter(r=>r.some(c=>String(c||'').trim().length)).map(r=>{
+    const obj = {};
+    head.forEach((k,idx)=>{
+      if(!k) return;
+      obj[k] = r[idx];
+    });
+    // vendor 필드 통합
+    const vendor = (obj.vendor||obj.company) ? { name:obj.vendor||obj.company } : {};
+    if (obj.email) vendor.email = obj.email;
+    if (obj.phone) vendor.phone = obj.phone;
+    if (obj.url)   vendor.site  = obj.url;
+    if (obj.address) vendor.addr = obj.address;
+    return {
+      name: obj.name||'',
+      unitCost: Number(obj.unitCost||0),
+      qty: Number(obj.qty||0),
+      note: obj.note||'',
+      vendor
+    };
+  });
+}
+
+function downloadBudgetTemplate(kind='csv'){
+  const headers = ['항목','단가','수량','비고','업체','email','phone','site','address'];
+  const sample = [
+    ['장소 대관','500000','1','1일 기준','A 컨벤션','sales@a.co','02-000-0000','https://a.co','서울시 …'],
+    ['강사료','800000','1','부가세 포함','홍길동','','','',''],
+    ['디자인','300000','1','배너/안내물','디자인랩','hello@design.com','','https://design.com',''],
+  ];
+  if (kind==='csv'){
+    const csv = [headers.join(','), ...sample.map(r=>r.map(s=>(/,|"/.test(s)?`"${s.replace(/"/g,'""')}"`:s)).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='budget-template.csv'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    return;
+  }
+  // xlsx
+  (async ()=>{
+    let XLSX = (globalThis.XLSX)||null;
+    if(!XLSX){
+      try{ XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default; }
+      catch(e){ alert('XLSX 모듈을 불러올 수 없어 CSV 템플릿만 제공합니다.'); return; }
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...sample]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Budget');
+    XLSX.writeFile(wb, 'budget-template.xlsx');
+  })();
+}
+
+/* ===== 업체 툴팁 ===== */
+function attachVendorTip(anchor, vendor){
+  let tip;
+  const show = ()=>{
+    if (tip) return;
+    const lines = [
+      vendor.name && `<div class="v-row"><b>${esc(vendor.name)}</b></div>`,
+      vendor.email && `<div class="v-row">${esc(vendor.email)}</div>`,
+      vendor.phone && `<div class="v-row">${esc(vendor.phone)}</div>`,
+      vendor.site  && `<div class="v-row"><a href="${vendor.site}" target="_blank">${esc(vendor.site)}</a></div>`,
+      vendor.addr  && `<div class="v-row">${esc(vendor.addr)}</div>`,
+    ].filter(Boolean).join('');
+    if(!lines) return;
+    tip = document.createElement('div');
+    tip.className = 'vendor-tip';
+    tip.innerHTML = lines;
+    document.body.appendChild(tip);
+    const r = anchor.getBoundingClientRect();
+    const x = r.left + (r.width/2);
+    const y = r.bottom + 8;
+    tip.style.left = Math.max(12, x - tip.offsetWidth/2) + 'px';
+    tip.style.top  = y + 'px';
+  };
+  const hide = ()=>{ if(tip){ tip.remove(); tip=null; } };
+  anchor.addEventListener('mouseenter', show);
+  anchor.addEventListener('mouseleave', hide);
+}
+
+/* ===== 유틸/스타일 ===== */
 function ensureStyle(){
   if (document.getElementById('it-style')) return;
   const s = document.createElement('style'); s.id='it-style';
-  s.textContent = `.sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}`;
+  s.textContent = `
+  .sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}
+  .importer .linklike{background:none;border:0;color:#8fb7ff;cursor:pointer;text-decoration:underline}
+  .v-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;background:#132235;color:#dbebff;font-size:.86rem}
+  .mini-badge{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:#132235;border:1px solid var(--line);font-size:.8rem;color:#cfe2ff}
+  .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
+  .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  `;
   document.head.appendChild(s);
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
