@@ -92,7 +92,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   /* ---------- 딥링크 상세 열기(검색/해시에서 detail=1로 진입 시) ---------- */
   const mapSectionId = (sec)=>{
-    // items:content → content 등으로 맵핑
     const m = {
       'items:content':'content',
       'items:budget':'budget',
@@ -107,7 +106,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const { section, year } = e.detail || {};
     const kind = mapSectionId(section);
     if (!['content','budget','outcome','design'].includes(kind)) return;
-    // year 없으면 첫 번째 연도로 폴백
     const y = year || (years && years[0]);
     if (y) openDetail(kind, y);
   };
@@ -185,34 +183,29 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const paint=()=>{
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
         if (EDIT){
+          // 숫자/텍스트 입력: 테이블 리렌더 없이 해당 셀/합계만 갱신
           tbody.querySelectorAll('input[data-i]').forEach(inp=>{
             const handler = ()=>{
               const i = +inp.dataset.i, k = inp.dataset.k;
               if (k==='name' || k==='note'){
                 items[i][k] = inp.value;
               }else{
-                // 숫자 필드는 자연스러운 좌→우 입력을 위해, 커서를 항상 맨 뒤로 복원
-                items[i][k] = Number(inp.value||0);
+                // 숫자만 허용(붙여넣기 등 방지), 빈값이면 0
+                const raw = (inp.value||'').replace(/[^\d]/g,'');
+                inp.value = raw; // 시각 동기화
+                items[i][k] = raw === '' ? 0 : Number(raw);
               }
+              // 소계/합계 즉시 갱신(무리한 repaint 금지)
               items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
-
-              // === 커서 복원 로직 ===
-              const isNum = (k==='unitCost' || k==='qty');
-              const desiredCaret = isNum ? String(inp.value||'').length : inp.selectionStart;
-
-              paint();
-
-              const again = tbody.querySelector(`input[data-i="${i}"][data-k="${k}"]`);
-              if (again){
-                again.focus();
-                try{
-                  const pos = isNum ? String(again.value||'').length : desiredCaret;
-                  again.setSelectionRange(pos, pos);
-                }catch(_){}
-              }
+              const row = inp.closest('tr');
+              row?.querySelector('.subtotal')?.replaceChildren(document.createTextNode(fmt.format(items[i].subtotal)));
+              const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
+              totalEl.textContent = fmt.format(total);
             };
             inp.addEventListener('input', handler);
           });
+
+          // 행 삭제/업체 편집은 구조가 바뀌므로 paint() 호출
           tbody.querySelectorAll('.delRow')?.forEach(btn=>{
             btn.addEventListener('click', ()=>{ const i=+btn.dataset.i; items.splice(i,1); paint(); });
           });
@@ -231,9 +224,9 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const rowHTML=(it,i)=>`
         <tr>
           <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
-          <td>${EDIT?`<input type="number" inputmode="numeric" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
-          <td>${EDIT?`<input type="number" inputmode="numeric" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
-          <td>${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
+          <td>${EDIT?`<input class="num" type="text" inputmode="numeric" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
+          <td>${EDIT?`<input class="num" type="text" inputmode="numeric" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
+          <td class="subtotal" data-i="${i}">${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
           <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
           <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
           ${EDIT?`<td><button class="om-btn delRow" data-i="${i}">삭제</button></td>`:''}
@@ -241,10 +234,15 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
       paint();
 
-      ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}}); paint(); });
+      ov.querySelector('#addRow')?.addEventListener('click', ()=>{
+        items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}});
+        paint();
+      });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const cleaned = items.map(it=>({
           ...it,
+          unitCost: Number(it.unitCost)||0,
+          qty: Number(it.qty)||0,
           subtotal:(Number(it.unitCost)||0)*(Number(it.qty)||0),
           vendor: it.vendor || {}
         }));
@@ -677,7 +675,7 @@ function parseCSV(text){
     for (let i=0;i<line.length;i++){
       const ch = line[i];
       if (ch === '"' ){
-        if (inQ && line[i+1]===""){ cur+='"'; i++; }
+        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
         else { inQ=!inQ; }
       } else if (ch === ',' && !inQ){
         cells.push(cur); cur='';
@@ -799,6 +797,9 @@ function ensureStyle(){
   .mini-badge{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:#132235;border:1px solid var(--line);font-size:.8rem;color:#cfe2ff}
   .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
   .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* 숫자 인풋 보정 */
+  input.num{ text-align:right; direction:ltr; }
 
   /* 디자인 갤러리(상세) */
   .gal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
