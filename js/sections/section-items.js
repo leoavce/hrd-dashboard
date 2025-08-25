@@ -66,7 +66,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   /* ---------- 저장 후 새로고침 없이 카드/합계 즉시 반영을 위한 부분 갱신 ---------- */
   const onYearUpdated = async (e)=>{
-    const { programId: pid, year: yUpd } = e.detail || {};
+    const { programId: pid } = e.detail || {};
     if (pid !== programId) return;
 
     // 최신 데이터 재로드
@@ -89,14 +89,12 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       });
     });
   };
-  // 중복리스너 방지용 네임스페이스 키
   const NS = `hrd-year-updated-items-${programId}`;
-  // 기존 리스너 제거 후 재등록(라우팅 재진입 대비)
   window.removeEventListener('hrd:year-updated', window[NS]);
   window[NS] = onYearUpdated;
   window.addEventListener('hrd:year-updated', onYearUpdated);
 
-  /* ---- 상세/수정 모달 (업로드/업체 툴팁 포함) ---- */
+  /* ---- 상세/수정 모달 ---- */
   async function openDetail(kind, y){
     const yRef = doc(db,'programs',programId,'years',y);
     const snap = await getDoc(yRef);
@@ -108,7 +106,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const val = ov.querySelector('#cOutline').value;
         await setDoc(yRef, { content:{ outline:val }, updatedAt: Date.now() }, { merge:true });
-        // 저장 즉시 부분 갱신 트리거
         window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         alert('저장되었습니다.');
         ov.remove();
@@ -142,10 +139,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
               <button class="linklike" id="tplCsv" type="button">CSV</button> ·
               <button class="linklike" id="tplXlsx" type="button">XLSX</button>
             </span>
-          </div>
-          <div class="muted small" style="margin-top:6px">
-            열 헤더(한/영 혼용 가능): 항목(item) / 단가(unitCost) / 수량(qty) / 비고(note) /
-            업체(vendor) / email / phone / site(url) / address(주소)
           </div>
         </div>
 
@@ -214,7 +207,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
       paint();
 
-      // 행 추가/저장
       ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}}); paint(); });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const cleaned = items.map(it=>({
@@ -223,13 +215,11 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           vendor: it.vendor || {}
         }));
         await setDoc(yRef, { budget:{ items: cleaned }, updatedAt: Date.now() }, { merge:true });
-        // 저장 즉시 부분 갱신 트리거
         window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         alert('저장되었습니다.');
         ov.remove();
       });
 
-      // 파일 가져오기 / 템플릿 다운로드
       ov.querySelector('#bdImport')?.addEventListener('click', async ()=>{
         const f = ov.querySelector('#bdFile')?.files?.[0];
         if(!f){ alert('CSV 또는 XLSX 파일을 선택하세요.'); return; }
@@ -255,7 +245,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             });
           });
           paint();
-          // 업로드만 해도 카드 즉시 반영
           window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
           alert('가져오기 완료');
         }catch(e){
@@ -293,7 +282,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           };
           mv.remove();
           paint();
-          // 업체만 바꿔도 카드 즉시 반영
           window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         });
       }
@@ -301,131 +289,151 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       return;
     }
 
-    if (kind==='outcome'){
-      const s = v?.outcome?.surveySummary || {};
-      const kpis     = (v?.outcome?.kpis||[]).map(x=>({ name:x.name||'', value:x.value||'', target:x.target||'', status:x.status||'' }));
-      const insights = (v?.outcome?.insights||[]).map(x=>({ title:x.title||'', detail:x.detail||'' }));
-
-      const html = `
-        <div class="mini-table">
-          <div class="row"><div>응답수</div><div>${EDIT?`<input id="oN" type="number" value="${s.n||0}">`:(s.n||0)}</div></div>
-          <div class="row"><div>CSAT</div><div>${EDIT?`<input id="oC" type="number" step="0.1" value="${s.csat??''}">`:(s.csat??'-')}</div></div>
-          <div class="row"><div>NPS</div><div>${EDIT?`<input id="oP" type="number" value="${s.nps??''}">`:(s.nps??'-')}</div></div>
-        </div>
-
-        <h4 style="margin:10px 0 6px">KPI</h4>
-        <div id="kpiBox"></div>
-        ${EDIT?'<button class="om-btn" id="kpiAdd">KPI 추가</button>':''}
-
-        <h4 style="margin:12px 0 6px">인사이트</h4>
-        <div id="insBox"></div>
-        ${EDIT?'<button class="om-btn" id="insAdd">인사이트 추가</button>':''}
-
-        ${EDIT?'<div style="margin-top:10px"><button class="om-btn primary" id="save">저장</button></div>':''}
-      `;
-      const ov = openModal({ title:`${y} 성과 상세`, contentHTML: html });
-
-      const paintKV = ()=>{
-        const kpiBox = ov.querySelector('#kpiBox');
-        kpiBox.innerHTML = kpis.map((k,i)=>`
-          <div class="kv" style="display:grid; grid-template-columns:1.2fr 1fr 1fr .8fr auto; gap:8px; margin-bottom:6px">
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="name"  value="${esc(k.name)}" placeholder="지표">`:`<b>${esc(k.name)}</b>`}
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="value" value="${esc(k.value)}" placeholder="값">`:`<span>${esc(k.value)}</span>`}
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="target" value="${esc(k.target)}" placeholder="목표">`:`<span>${esc(k.target)}</span>`}
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="status" value="${esc(k.status)}" placeholder="상태">`:`<span>${esc(k.status)}</span>`}
-            ${EDIT?`<button class="om-btn delK" data-i="${i}">삭제</button>`:''}
-          </div>
-        `).join('') || '<div class="muted">없음</div>';
-
-        const insBox = ov.querySelector('#insBox');
-        insBox.innerHTML = insights.map((k,i)=>`
-          <div class="kv" style="display:grid; grid-template-columns:1fr 2fr auto; gap:8px; margin-bottom:6px">
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="title" value="${esc(k.title)}" placeholder="제목">`:`<b>${esc(k.title)}</b>`}
-            ${EDIT?`<input class="inp" data-i="${i}" data-k="detail" value="${esc(k.detail)}" placeholder="내용">`:`<span>${esc(k.detail)}</span>`}
-            ${EDIT?`<button class="om-btn delI" data-i="${i}">삭제</button>`:''}
-          </div>
-        `).join('') || '<div class="muted">없음</div>';
-
-        if (EDIT){
-          ov.querySelectorAll('#kpiBox .inp').forEach(inp=>{
-            inp.addEventListener('input', ()=>{ const i=+inp.dataset.i; const k=inp.dataset.k; kpis[i][k]=inp.value; });
-          });
-          ov.querySelectorAll('#insBox .inp').forEach(inp=>{
-            inp.addEventListener('input', ()=>{ const i=+inp.dataset.i; const k=inp.dataset.k; insights[i][k]=inp.value; });
-          });
-          ov.querySelectorAll('.delK').forEach(b=> b.addEventListener('click', ()=>{ kpis.splice(+b.dataset.i,1); paintKV(); }));
-          ov.querySelectorAll('.delI').forEach(b=> b.addEventListener('click', ()=>{ insights.splice(+b.dataset.i,1); paintKV(); }));
-        }
-      };
-      paintKV();
-
-      ov.querySelector('#kpiAdd')?.addEventListener('click', ()=>{ kpis.push({name:'',value:'',target:'',status:''}); paintKV(); });
-      ov.querySelector('#insAdd')?.addEventListener('click', ()=>{ insights.push({title:'',detail:''}); paintKV(); });
-      ov.querySelector('#save')?.addEventListener('click', async ()=>{
-        const payload = {
-          outcome:{
-            surveySummary:{
-              n: Number(ov.querySelector('#oN')?.value||s.n||0),
-              csat: Number(ov.querySelector('#oC')?.value||s.csat||0),
-              nps: Number(ov.querySelector('#oP')?.value||s.nps||0)
-            },
-            kpis, insights
-          },
-          updatedAt: Date.now()
-        };
-        await setDoc(yRef, payload, { merge:true });
-        // 저장 즉시 부분 갱신
-        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
-        alert('저장되었습니다.');
-        ov.remove();
-      });
-      return;
-    }
-
     if (kind==='design'){
-      const assets = (v?.design?.assetLinks||[]).slice();
-      const html = `
-        <div class="gal gal-lg" id="galBox">${assets.map(url=>thumb(url,true)).join('') || '<div class="muted">자산 없음</div>'}</div>
-        ${EDIT?`
-        <div class="row" style="margin-top:10px">
-          <input type="file" id="f" multiple>
-          <button class="om-btn primary" id="up">업로드</button>
-        </div>`:''}
-      `;
-      const ov = openModal({ title:`${y} 디자인 상세`, contentHTML: html });
+      // ------- 확장: 이미지/텍스트 자산 통합 + 메모 -------
+      // 기존 assetLinks 호환
+      const legacy = (v?.design?.assetLinks||[]).map(u=>({ id: crypto.randomUUID(), type:'img', url:u, memo:'' }));
+      let assets = Array.isArray(v?.design?.assets) ? v.design.assets.slice() : legacy;
 
-      const repaint=()=>{
-        ov.querySelector('#galBox').innerHTML = assets.length? assets.map(u=>thumb(u,true)).join('') : '<div class="muted">자산 없음</div>';
-        if (EDIT){
-          ov.querySelectorAll('.delAsset').forEach(btn=>{
-            btn.addEventListener('click', async ()=>{
-              const url = btn.dataset.url;
-              try{ await deleteObject(ref(storage, url)); }catch(e){}
-              await updateDoc(yRef, { 'design.assetLinks': arrayRemove(url) });
-              const idx = assets.indexOf(url); if (idx>-1) assets.splice(idx,1);
-              repaint();
-              // 삭제 즉시 부분 갱신
-              window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
-            });
-          });
-        }
+      const ov = openModal({
+        title:`${y} 디자인 상세`,
+        contentHTML: `
+          <div class="gal-actions">
+            ${EDIT?`
+              <div class="row wrap" style="gap:8px">
+                <input type="file" id="dFiles" multiple accept="image/*">
+                <button class="om-btn primary" id="dUpload">이미지 업로드</button>
+                <button class="om-btn" id="dAddText">텍스트 추가</button>
+              </div>
+            `:''}
+          </div>
+          <div id="galGrid" class="gal-grid"></div>
+        `
+      });
+
+      const gal = ov.querySelector('#galGrid');
+
+      const saveAssets = async ()=>{
+        // assetLinks(이미지 전용)도 계속 맞춰서 저장(구버전 호환)
+        const links = assets.filter(a=>a.type==='img').map(a=>a.url);
+        await updateDoc(doc(db,'programs',programId,'years',y), {
+          'design.assets': assets,
+          'design.assetLinks': links,
+          updatedAt: Date.now()
+        });
+        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
       };
-      ov.querySelector('#up')?.addEventListener('click', async ()=>{
-        const files = Array.from(ov.querySelector('#f').files||[]);
+
+      const card = (a,i)=>{
+        if (a.type==='text'){
+          return `
+            <div class="gcard" data-i="${i}">
+              <div class="gtext">
+                <div class="gtext-main">
+                  ${a.href?`<a href="${esc(a.href)}" target="_blank" rel="noopener">${esc(a.text||'텍스트')}</a>`:esc(a.text||'텍스트')}
+                </div>
+              </div>
+              ${a.memo?`<div class="gmemo">${esc(a.memo)}</div>`:''}
+              ${EDIT?`
+                <div class="gedit">
+                  <input class="ginp gtxt" placeholder="텍스트" value="${esc(a.text||'')}">
+                  <input class="ginp ghref" placeholder="URL(선택)" value="${esc(a.href||'')}">
+                  <input class="ginp gm" placeholder="메모(선택)" value="${esc(a.memo||'')}">
+                  <button class="om-btn danger gdel">삭제</button>
+                </div>
+              `:''}
+            </div>`;
+        }
+        // image
+        return `
+          <div class="gcard" data-i="${i}">
+            <figure class="gimg"><img src="${a.url}" alt="asset"></figure>
+            ${a.memo?`<div class="gmemo">${esc(a.memo)}</div>`:''}
+            ${EDIT?`
+              <div class="gedit">
+                <input class="ginp gm" placeholder="메모(예: 9월 전표)" value="${esc(a.memo||'')}">
+                <button class="om-btn danger gdel">삭제</button>
+              </div>
+            `:''}
+          </div>`;
+      };
+
+      const paint = ()=>{
+        gal.innerHTML = assets.length
+          ? assets.map(card).join('')
+          : `<div class="muted">자산 없음</div>`;
+
+        if (!EDIT) return;
+
+        // 입력들 -> 즉시 저장(blur 시)
+        gal.querySelectorAll('.gcard').forEach(box=>{
+          const i = +box.dataset.i;
+          box.querySelector('.gm')?.addEventListener('blur', async (e)=>{
+            assets[i].memo = e.target.value.trim();
+            await saveAssets();
+            // 메모 표시부 갱신
+            paint();
+          });
+          box.querySelector('.gtxt')?.addEventListener('blur', async (e)=>{
+            assets[i].text = e.target.value;
+            await saveAssets(); paint();
+          });
+          box.querySelector('.ghref')?.addEventListener('blur', async (e)=>{
+            assets[i].href = e.target.value.trim();
+            await saveAssets(); paint();
+          });
+          box.querySelector('.gdel')?.addEventListener('click', async ()=>{
+            const a = assets[i];
+            assets.splice(i,1);
+            // 스토리지 원본 삭제는 URL로 ref를 못 만들 수 있어 실패 가능 → best-effort 유지
+            if (a.type==='img'){
+              try{ await deleteObject(ref(storage, a.url)); }catch(_){}
+            }
+            await saveAssets(); paint();
+          });
+        });
+      };
+
+      // 업로드
+      ov.querySelector('#dUpload')?.addEventListener('click', async ()=>{
+        const files = Array.from(ov.querySelector('#dFiles')?.files||[]);
         if (!files.length) return;
         for (const file of files){
           const r = ref(storage, `programs/${programId}/years/${y}/design/${Date.now()}_${file.name}`);
           await uploadBytes(r, file);
           const url = await getDownloadURL(r);
-          await updateDoc(yRef, { 'design.assetLinks': arrayUnion(url) });
-          assets.push(url);
+          assets.push({ id: crypto.randomUUID(), type:'img', url, memo:'' });
         }
-        repaint();
-        // 업로드 즉시 부분 갱신
-        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+        await saveAssets(); paint();
         alert('업로드 완료');
       });
-      repaint();
+
+      // 텍스트 추가
+      ov.querySelector('#dAddText')?.addEventListener('click', ()=>{
+        const mv = openModal({
+          title:'텍스트 자산 추가',
+          contentHTML: `
+            <div class="mini-form">
+              <label>텍스트<input id="tText" placeholder="예: 9월 전표"></label>
+              <label>링크(URL, 선택)<input id="tHref" placeholder="https://..."></label>
+              <label>메모(선택)<input id="tMemo" placeholder="설명"></label>
+            </div>
+          `,
+          footerHTML:`<button class="om-btn" id="cancel">취소</button><button class="om-btn primary" id="ok">추가</button>`
+        });
+        mv.querySelector('#cancel').addEventListener('click', ()=> mv.remove());
+        mv.querySelector('#ok').addEventListener('click', async ()=>{
+          const text = mv.querySelector('#tText').value.trim();
+          const href = mv.querySelector('#tHref').value.trim();
+          const memo = mv.querySelector('#tMemo').value.trim();
+          if (!text){ alert('텍스트를 입력하세요.'); return; }
+          assets.push({ id: crypto.randomUUID(), type:'text', text, href, memo });
+          mv.remove();
+          await saveAssets(); paint();
+        });
+      });
+
+      paint();
       return;
     }
   }
@@ -483,10 +491,20 @@ function renderOutcomeCard(y, v){
   `;
 }
 function renderDesignCard(y, v){
-  const assets=(v?.design?.assetLinks||[]).slice(0,3);
+  // 카드에는 최대 3개 미리보기(이미지/텍스트 혼합)
+  const norm = Array.isArray(v?.design?.assets)
+    ? v.design.assets
+    : (v?.design?.assetLinks||[]).map(u=>({ type:'img', url:u, memo:'' }));
+  const three = norm.slice(0,3);
+  const cells = three.map(a=>{
+    if (a.type==='text'){
+      return `<div class="thumb text"><div class="tx">${esc(a.text||'텍스트')}${a.href?` <span class="link-hint">↗</span>`:''}</div>${a.memo?`<div class="mini-memo">${esc(a.memo)}</div>`:''}</div>`;
+    }
+    return `<div class="thumb"><img src="${a.url}" alt=""><div class="mini-memo">${esc(a.memo||'')}</div></div>`;
+  }).join('');
   return `
     <div class="cap">${y}</div>
-    <div class="gal">${assets.map(u=>`<div class="thumb"><img src="${u}"></div>`).join('') || '<div class="muted">자산 없음</div>'}</div>
+    <div class="gal">${cells || '<div class="muted">자산 없음</div>'}</div>
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
@@ -516,8 +534,7 @@ async function parseBudgetFile(file){
     let XLSX = (globalThis.XLSX)||null;
     if(!XLSX){
       try{
-        // ✅ 올바른 경로로 수정
-        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs')).default;
+        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default;
       }catch(e){
         console.warn('XLSX 모듈 로드 실패, CSV만 지원됩니다.'); throw new Error('XLSX 모듈 로드 실패');
       }
@@ -607,10 +624,7 @@ function downloadBudgetTemplate(kind='csv'){
   (async ()=>{
     let XLSX = (globalThis.XLSX)||null;
     if(!XLSX){
-      try{
-        // ✅ 올바른 경로로 수정
-        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs')).default;
-      }
+      try{ XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default; }
       catch(e){ alert('XLSX 모듈을 불러올 수 없어 CSV 템플릿만 제공합니다.'); return; }
     }
     const wb = XLSX.utils.book_new();
@@ -665,8 +679,35 @@ function ensureStyle(){
   .mini-badge{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:#132235;border:1px solid var(--line);font-size:.8rem;color:#cfe2ff}
   .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
   .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* 디자인 갤러리(상세) */
+  .gal-grid{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:12px;
+  }
+  .gcard{
+    background:#0f1b22; border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+  .gimg{width:100%; aspect-ratio: 4/3; overflow:hidden; background:#0b141e;}
+  .gimg img{width:100%; height:100%; object-fit:cover; display:block;}
+  .gtext{padding:14px 12px;}
+  .gtext-main{font-weight:700; color:#eaf2ff; word-break:break-word;}
+  .gmemo{padding:8px 12px; border-top:1px dashed #223246; color:#cfe2ff; font-size:.9rem;}
+  .gedit{display:flex; gap:6px; padding:8px; border-top:1px solid var(--line); background:#0c1522}
+  .ginp{flex:1; min-width:0}
+  .gal-actions{margin-bottom:10px}
+
+  /* 카드(요약) 갤러리 스타일 보정 */
+  .gal{display:flex; gap:8px; flex-wrap:wrap}
+  .gal .thumb{width:90px; height:70px; border-radius:8px; overflow:hidden; background:#0b141e; border:1px solid var(--line); position:relative}
+  .gal .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .gal .thumb.text{display:flex; align-items:center; justify-content:center; padding:6px; color:#eaf2ff; font-size:.82rem; text-align:center}
+  .gal .thumb .mini-memo{position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); color:#fff; font-size:.72rem; padding:2px 6px}
+  .link-hint{opacity:.8}
+
+  /* 미니 메모 폰트 */
+  .mini-memo{color:#cfe2ff}
   `;
   document.head.appendChild(s);
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-function thumb(url, deletable){ return `<div class="thumb"><img src="${url}">${deletable?`<div style="margin-top:6px;text-align:center"><button class="om-btn delAsset" data-url="${url}">삭제</button></div>`:''}</div>`; }
