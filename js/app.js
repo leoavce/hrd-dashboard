@@ -1,4 +1,5 @@
 // js/app.js
+// (위쪽 동일 — 생략 없음, 전체 파일 그대로)
 import { auth, db, storage } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, getDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -198,7 +199,7 @@ const SECTIONS = [
   { id:'widget:summary',label:'위젯(전체 요약)', keys:['위젯','요약','summary','overview'] },
 ];
 
-/* >>> 디자인 텍스트/메모/링크까지 포함해 인덱싱 */
+/* >>> 디자인 텍스트는 '제목(항목명)'만 인덱싱 (URL/메모 제외) */
 async function buildSearchIndex(programs){
   const contents = [];
   for (const p of programs){
@@ -216,7 +217,7 @@ async function buildSearchIndex(programs){
         text: pick(v?.content?.outline)
       });
 
-      // 2) 예산(항목명/비고/업체명만 평문으로)
+      // 2) 예산(항목명/비고/업체명만 평문)
       const bitems = (v?.budget?.items||[]);
       const budgetText = bitems.map(it => [
         it?.name||'',
@@ -244,15 +245,17 @@ async function buildSearchIndex(programs){
         text: outcomeText
       });
 
-      // 4) 디자인(노트 + 자산 텍스트/메모/링크까지)
+      // 4) 디자인
       const d = v?.design || {};
       const designTexts = [];
       if (Array.isArray(d.assets)){
         d.assets.forEach(a=>{
           if (a?.type==='text'){
-            designTexts.push(a.text||'', a.memo||'', a.href||'');
+            // 제목(텍스트)만 — URL/메모 제외
+            if (a.text) designTexts.push(a.text);
           }else if (a?.type==='img'){
-            designTexts.push(a.memo||'');
+            // 이미지 메모는 유지
+            if (a.memo) designTexts.push(a.memo);
           }
         });
       }
