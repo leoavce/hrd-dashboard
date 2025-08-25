@@ -18,12 +18,12 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
   // 프리뷰 오버라이드(편집 중 미리보기)
   const preview = {};
 
-  // 프리뷰 이벤트 리스너
+  /* ===== 프리뷰 이벤트(편집 즉시 반영) ===== */
   const onPreview = (e)=>{
     const d = e.detail||{};
     if (d.programId !== programId) return;
     if (d.year && d.data){
-      preview[d.year] = d.data; // 예: { budget:{items:...} }
+      preview[d.year] = d.data; // 예: { budget:{items:...}, design:{assets:[...]}, ... }
       paint();
     }
   };
@@ -36,6 +36,16 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
   window.addEventListener('hrd:preview-year', onPreview);
   window.addEventListener('hrd:preview-clear', onPreviewClear);
 
+  // 저장 이후 실제 데이터가 바뀐 경우 재로딩
+  const NS = `hrd-year-updated-widgets-${programId}`;
+  window.removeEventListener('hrd:year-updated', window[NS]);
+  window[NS] = async (e)=>{
+    if (e?.detail?.programId !== programId) return;
+    yearMap = await loadYears(db, programId, years);
+    paint();
+  };
+  window.addEventListener('hrd:year-updated', window[NS]);
+
   function mergedYearMap(){
     const m = { ...yearMap };
     Object.keys(preview).forEach(y=>{
@@ -44,12 +54,32 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     return m;
   }
 
+  function mergedAssetsFrom(ymap){
+    // 각 연도의 design.assets(type:'img') 및 레거시 assetLinks 수집
+    const list = [];
+    for (const y of years){
+      const d = (ymap[y]?.design)||{};
+      if (Array.isArray(d.assets)){
+        d.assets.forEach(a=>{ if (a?.type==='img' && a.url) list.push(a.url); });
+      }
+      if (Array.isArray(d.assetLinks)){
+        d.assetLinks.forEach(u=> list.push(u));
+      }
+    }
+    // 단일문서(레거시)도 보조로 포함
+    if (Array.isArray(single?.design?.assetLinks)){
+      single.design.assetLinks.forEach(u=> list.push(u));
+    }
+    return list;
+  }
+
   function paint(){
     const ymap = mergedYearMap();
     const budgetAverages  = calcBudgetAverage(ymap);
     const outcomeAverages = calcOutcomeAverage(ymap);
-    const assets = (single?.design?.assetLinks || []);
-    const randomAssets = pickRandom(assets, 6);
+
+    const gallery = mergedAssetsFrom(ymap);
+    const randomAssets = pickRandom(gallery, 6);
 
     const tiles = [];
     if (enabled.includes('summary')) tiles.push(tile('교육 내용 전반 요약', `
@@ -60,10 +90,10 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     if (enabled.includes('budget')) tiles.push(tile('예산안 평균', `
       <div class="mini-table">
-        <div class="row"><div>평균 총액</div><div>${fmt.format(budgetAverages.totalAvg || 0)} 원</div></div>
+        <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
         ${(budgetAverages.items || []).slice(0,4).map(it=>`
           <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
-        `).join('')}
+        ).join('')}
       </div>
     `,'openBudget'));
 
@@ -84,10 +114,10 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     mount.innerHTML = `<div class="sec sec-wg"><div class="grid4">${tiles.join('')}</div></div>`;
 
     // 상세 모달들
-    bindModals(ymap, budgetAverages, outcomeAverages, years);
+    bindModals(ymap, gallery, budgetAverages, outcomeAverages, years);
   }
 
-  function bindModals(ymap, budgetAverages, outcomeAverages, years){
+  function bindModals(ymap, gallery, budgetAverages, outcomeAverages, years){
     // 요약
     mount.querySelector('[data-act="openSummary"]')?.addEventListener('click', ()=>{
       const content = `<textarea id="wgTxt" style="width:100%;min-height:280px" ${EDIT ? '' : 'readonly'}>${esc(summary?.widgetNote || '')}</textarea>`;
@@ -108,7 +138,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       }
       const content = `
         <div class="mini-table" style="margin-bottom:8px">
-          <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(budgetAverages.totalAvg||0)} 원</b></div></div>
+          <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(Math.round(budgetAverages.totalAvg||0))} 원</b></div></div>
         </div>
         <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
       `;
@@ -135,14 +165,9 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     // 갤러리
     mount.querySelector('[data-act="openGallery"]')?.addEventListener('click', ()=>{
-      const assets = (mergedAssets()||[]);
-      const content = `<div class="gal gal-lg">${assets.map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
+      const content = `<div class="gal gal-lg">${(gallery||[]).map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
       openModal({ title:'포함 디자인 갤러리', contentHTML:content });
     });
-
-    function mergedAssets(){
-      return (single?.design?.assetLinks || []);
-    }
   }
 
   // 처음 그리기
@@ -152,6 +177,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
   mount.addEventListener('DOMNodeRemoved', ()=>{
     window.removeEventListener('hrd:preview-year', onPreview);
     window.removeEventListener('hrd:preview-clear', onPreviewClear);
+    window.removeEventListener('hrd:year-updated', window[NS]);
   });
 }
 
