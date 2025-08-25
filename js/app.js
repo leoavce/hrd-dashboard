@@ -198,7 +198,7 @@ const SECTIONS = [
   { id:'widget:summary',label:'위젯(전체 요약)', keys:['위젯','요약','summary','overview'] },
 ];
 
-/* >>> 변경 핵심: 예산 텍스트는 항목명/비고/업체명만 평문으로 합쳐 인덱싱 */
+/* >>> 디자인 텍스트/메모/링크까지 포함해 인덱싱 */
 async function buildSearchIndex(programs){
   const contents = [];
   for (const p of programs){
@@ -216,7 +216,7 @@ async function buildSearchIndex(programs){
         text: pick(v?.content?.outline)
       });
 
-      // 2) 예산(평문)
+      // 2) 예산(항목명/비고/업체명만 평문으로)
       const bitems = (v?.budget?.items||[]);
       const budgetText = bitems.map(it => [
         it?.name||'',
@@ -244,11 +244,22 @@ async function buildSearchIndex(programs){
         text: outcomeText
       });
 
-      // 4) 디자인(노트만)
+      // 4) 디자인(노트 + 자산 텍스트/메모/링크까지)
+      const d = v?.design || {};
+      const designTexts = [];
+      if (Array.isArray(d.assets)){
+        d.assets.forEach(a=>{
+          if (a?.type==='text'){
+            designTexts.push(a.text||'', a.memo||'', a.href||'');
+          }else if (a?.type==='img'){
+            designTexts.push(a.memo||'');
+          }
+        });
+      }
       contents.push({
         programId:p.id, programTitle:p.title||p.id,
         section:'items:design', sectionLabel:'디자인', year:y,
-        text: pick(v?.design?.note)
+        text: [pick(d.note), designTexts.join(' ')].join(' ')
       });
     }
   }
@@ -271,9 +282,6 @@ function renderSuggestions(q, idx){
 
 /**
  * 의도: "세부 보기(모달) 후보"를 직접 제공
- *  - 섹션 키워드가 있으면: 섹션 × (지정연도 || 기본연도) × (지정프로그램 || 전체)
- *  - 섹션 키워드 없이 프로그램만 있으면: 그 프로그램의 4개 섹션 × 전체 연도
- *  - 키워드(자유 텍스트)가 있으면: contents 풀텍스트에서 스니펫 매칭
  */
 function search(q, idx){
   const lc = q.toLowerCase();
@@ -326,7 +334,7 @@ function search(q, idx){
     });
   }
 
-  // 3) 풀텍스트 후보(내용/예산/성과/디자인 텍스트 매칭)
+  // 3) 풀텍스트 후보
   if(q && !secHit){
     const MAX = 20;
     const hits = idx.contents.filter(c => (c.text||'').toString().toLowerCase().includes(lc)).slice(0,MAX);
@@ -476,7 +484,6 @@ async function renderProgramPage(programId, options = {}){
     }
     // 상세 모달 직접 열기: items 섹션만
     if (options.openDetail && !isWidget){
-      // 섹션/연도 전달
       window.dispatchEvent(new CustomEvent('hrd:open-detail', {
         detail: { section: options.focus, year: options.year || '' }
       }));
