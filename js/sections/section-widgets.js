@@ -93,7 +93,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
         ${(budgetAverages.items || []).slice(0,4).map(it=>`
           <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
-        ).join('')}
+        `).join('')}
       </div>
     `,'openBudget'));
 
