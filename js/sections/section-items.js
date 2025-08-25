@@ -13,8 +13,19 @@ export function updateItemEditMode(on){ EDIT = !!on; }
 export async function renderItemSection({ db, storage, programId, mount, years, schema }) {
   ensureStyle();
   const enabled = (schema?.sections?.items || ['content','budget','outcome','design']);
-  const data = await loadYears(db, programId, years);
 
+  // 최초 데이터 로드
+  let data = await loadYears(db, programId, years);
+
+  // 렌더러 맵 (부분 갱신 시 사용)
+  const RENDERERS = {
+    content: renderContentCard,
+    budget:  renderBudgetCard,
+    outcome: renderOutcomeCard,
+    design:  renderDesignCard,
+  };
+
+  // 블록 템플릿
   const blocks = [];
   if (enabled.includes('content')) blocks.push(block('교육 내용','content'));
   if (enabled.includes('budget'))  blocks.push(block('교육 예산','budget'));
@@ -23,31 +34,69 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   mount.innerHTML = `<div class="sec">${blocks.join('<div class="divider"></div>')}</div>`;
 
-  if (enabled.includes('content')) initCarousel('content', renderContentCard);
-  if (enabled.includes('budget'))  initCarousel('budget',  renderBudgetCard);
-  if (enabled.includes('outcome')) initCarousel('outcome', renderOutcomeCard);
-  if (enabled.includes('design'))  initCarousel('design',  renderDesignCard);
+  // 각 섹션 캐러셀 초기화
+  if (enabled.includes('content')) initCarousel('content', RENDERERS.content);
+  if (enabled.includes('budget'))  initCarousel('budget',  RENDERERS.budget);
+  if (enabled.includes('outcome')) initCarousel('outcome', RENDERERS.outcome);
+  if (enabled.includes('design'))  initCarousel('design',  RENDERERS.design);
 
   function initCarousel(kind, renderer){
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
     const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
     let index = 0;
     const clamp = v => Math.max(0, Math.min(years.length-3, v));
-    function slice(){ const s = years.slice(index,index+3); return s.length?s:years.slice(Math.max(0,years.length-3)); }
-    function paint(){
-      const s = slice(); yBox.textContent = s.join('  |  ');
+    const slice = ()=> {
+      const s = years.slice(index,index+3);
+      return s.length ? s : years.slice(Math.max(0,years.length-3));
+    };
+    const paint = ()=>{
+      const s = slice();
+      yBox.textContent = s.join('  |  ');
       host.innerHTML = s.map(y=>`<article class="it-card" data-year="${y}"></article>`).join('');
       host.querySelectorAll('.it-card').forEach(el=>{
-        const y = el.dataset.year; el.innerHTML = renderer(y, data[y] || {});
+        const y = el.dataset.year;
+        el.innerHTML = renderer(y, data[y] || {});
         el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
       });
-    }
+    };
     mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index = clamp(index-1); paint(); });
     mount.querySelector(`[data-kind="${kind}"] .nav.next`).addEventListener('click', ()=>{ index = clamp(index+1); paint(); });
     paint();
   }
 
-  /* ---- 상세/수정 모달 (업로드/업체/실시간 프리뷰) ---- */
+  /* ---------- 저장 후 새로고침 없이 카드/합계 즉시 반영을 위한 부분 갱신 ---------- */
+  const onYearUpdated = async (e)=>{
+    const { programId: pid, year: yUpd } = e.detail || {};
+    if (pid !== programId) return;
+
+    // 최신 데이터 재로드
+    data = await loadYears(db, programId, years);
+
+    // 현재 보여지는 연도들만 각 섹션의 카드 내용을 리바인딩
+    ['content','budget','outcome','design'].forEach(kind=>{
+      if (!enabled.includes(kind)) return;
+      const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
+      const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
+      if (!yBox || !host) return;
+
+      const shownYears = yBox.textContent.split('|').map(s=>s.trim()).filter(Boolean);
+      shownYears.forEach(y=>{
+        const card = host.querySelector(`.it-card[data-year="${y}"]`);
+        if (!card) return;
+        card.innerHTML = RENDERERS[kind](y, data[y] || {});
+        // “상세 보기” 버튼 재바인딩
+        card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
+      });
+    });
+  };
+  // 중복리스너 방지용 네임스페이스 키
+  const NS = `hrd-year-updated-items-${programId}`;
+  // 기존 리스너 제거 후 재등록(라우팅 재진입 대비)
+  window.removeEventListener('hrd:year-updated', window[NS]);
+  window[NS] = onYearUpdated;
+  window.addEventListener('hrd:year-updated', onYearUpdated);
+
+  /* ---- 상세/수정 모달 (업로드/업체 툴팁 포함) ---- */
   async function openDetail(kind, y){
     const yRef = doc(db,'programs',programId,'years',y);
     const snap = await getDoc(yRef);
@@ -56,29 +105,18 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     if (kind==='content'){
       const html = `<textarea id="cOutline" style="width:100%;min-height:320px" ${EDIT?'':'readonly'}>${esc(v?.content?.outline||'')}</textarea>`;
       const ov = openModal({ title:`${y} 교육 내용 상세`, contentHTML: html, footerHTML: EDIT? `<button class="om-btn primary" id="save">저장</button>`:'' });
-
-      // 프리뷰(카드/위젯) 반영
-      if (EDIT){
-        const input = ov.querySelector('#cOutline');
-        input.addEventListener('input', ()=>{
-          const val = input.value;
-          // 카드 즉시 미리보기
-          const card = mount.querySelector(`.it-sec[data-kind="content"] .it-card[data-year="${y}"]`);
-          if (card) card.innerHTML = renderContentCard(y, { content:{ outline: val }});
-          // 위젯은 내용과 직접 연동 안하므로 건너뜀
-        });
-      }
-
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const val = ov.querySelector('#cOutline').value;
         await setDoc(yRef, { content:{ outline:val }, updatedAt: Date.now() }, { merge:true });
-        alert('저장되었습니다.'); ov.remove();
+        // 저장 즉시 부분 갱신 트리거
+        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+        alert('저장되었습니다.');
+        ov.remove();
       });
       return;
     }
 
     if (kind==='budget'){
-      // === 스키마 확장: vendor 정보 포함 ===
       const coerce = (it)=>({
         name: it?.name||'',
         unitCost: Number(it?.unitCost||0),
@@ -101,9 +139,13 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             <input type="file" id="bdFile" accept=".csv,.xlsx,.xls">
             <button class="om-btn" id="bdImport">파일 가져오기</button>
             <span class="muted small">템플릿:
-              <button class="linklike" id="tplCsv">CSV</button> ·
-              <button class="linklike" id="tplXlsx">XLSX</button>
+              <button class="linklike" id="tplCsv" type="button">CSV</button> ·
+              <button class="linklike" id="tplXlsx" type="button">XLSX</button>
             </span>
+          </div>
+          <div class="muted small" style="margin-top:6px">
+            열 헤더(한/영 혼용 가능): 항목(item) / 단가(unitCost) / 수량(qty) / 비고(note) /
+            업체(vendor) / email / phone / site(url) / address(주소)
           </div>
         </div>
 
@@ -128,95 +170,52 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         ? `<span class="v-chip" data-vendor='${encodeURIComponent(JSON.stringify(v))}'>${esc(v.name)}</span>`
         : `<span class="muted small">-</span>`;
 
-      // 초기 그리기
-      tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
-      attachRowHandlers();
-      redrawTotal();
-      applyVendorTips();
-
-      // ====== 입력 즉시 반영(전체 리렌더 없음) ======
-      function onCellInput(inp){
-        const i = +inp.dataset.i, k = inp.dataset.k;
-        if (k==='name' || k==='note'){ items[i][k] = inp.value; }
-        else { items[i][k] = Number(inp.value||0); }
-        items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
-
-        // 해당 행 소계만 갱신
-        const row = tbody.querySelector(`tr[data-i="${i}"]`);
-        if (row){
-          row.querySelector('.cell-sub').textContent = fmt.format(items[i].subtotal||0);
+      const paint=()=>{
+        tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
+        if (EDIT){
+          tbody.querySelectorAll('input[data-i]').forEach(inp=>{
+            const handler = ()=>{
+              const i = +inp.dataset.i, k = inp.dataset.k;
+              if (k==='name' || k==='note'){ items[i][k] = inp.value; }
+              else { items[i][k] = Number(inp.value||0); }
+              items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
+              const pos = inp.selectionStart;
+              paint();
+              const again = tbody.querySelector(`input[data-i="${i}"][data-k="${k}"]`);
+              if (again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(_){} }
+            };
+            inp.addEventListener('input', handler);
+          });
+          tbody.querySelectorAll('.delRow')?.forEach(btn=>{
+            btn.addEventListener('click', ()=>{ const i=+btn.dataset.i; items.splice(i,1); paint(); });
+          });
+          tbody.querySelectorAll('.vEdit')?.forEach(btn=>{
+            btn.addEventListener('click', ()=> openVendorEditor(+btn.dataset.i));
+          });
         }
-        // 합계/카드/위젯 프리뷰 갱신
-        redrawTotal();
-        previewToCardsAndWidgets();
-      }
-
-      function redrawTotal(){
         const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
         totalEl.textContent = fmt.format(total);
-      }
-
-      function attachRowHandlers(){
-        if (!EDIT) return;
-        tbody.querySelectorAll('input[data-i]').forEach(inp=>{
-          // input에서 전체 리렌더를 유발하지 않음
-          inp.addEventListener('input', ()=> onCellInput(inp));
-        });
-        tbody.querySelectorAll('.delRow').forEach(btn=>{
-          btn.addEventListener('click', ()=>{
-            const i = +btn.dataset.i;
-            // DOM에서 해당 행만 제거
-            items.splice(i,1);
-            tbody.querySelector(`tr[data-i="${i}"]`)?.remove();
-            renumberRows();
-            redrawTotal();
-            previewToCardsAndWidgets();
-          });
-        });
-        tbody.querySelectorAll('.vEdit').forEach(btn=>{
-          btn.addEventListener('click', ()=> openVendorEditor(+btn.dataset.i));
-        });
-      }
-
-      function renumberRows(){
-        // 행 인덱스 재부여
-        [...tbody.querySelectorAll('tr')].forEach((tr,idx)=>{
-          tr.dataset.i = idx;
-          tr.querySelectorAll('[data-i]').forEach(el=> el.dataset.i = String(idx));
-        });
-        applyVendorTips();
-      }
-
-      function applyVendorTips(){
         tbody.querySelectorAll('.v-chip').forEach(ch=>{
           const data = JSON.parse(decodeURIComponent(ch.dataset.vendor||'%7B%7D'));
           attachVendorTip(ch, data);
         });
-      }
+      };
 
-      function rowHTML(it,i){
-        return `
-        <tr data-i="${i}">
+      const rowHTML=(it,i)=>`
+        <tr>
           <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
           <td>${EDIT?`<input type="number" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
           <td>${EDIT?`<input type="number" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
-          <td class="cell-sub">${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
+          <td>${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
           <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
           <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
           ${EDIT?`<td><button class="om-btn delRow" data-i="${i}">삭제</button></td>`:''}
         </tr>`;
-      }
+
+      paint();
 
       // 행 추가/저장
-      ov.querySelector('#addRow')?.addEventListener('click', ()=>{
-        const i = items.length;
-        const it = {name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}};
-        items.push(it);
-        tbody.insertAdjacentHTML('beforeend', rowHTML(it,i));
-        attachRowHandlers();
-        previewToCardsAndWidgets();
-      });
-
+      ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}}); paint(); });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const cleaned = items.map(it=>({
           ...it,
@@ -224,12 +223,13 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           vendor: it.vendor || {}
         }));
         await setDoc(yRef, { budget:{ items: cleaned }, updatedAt: Date.now() }, { merge:true });
-        // 커밋 후 프리뷰 정리
-        window.dispatchEvent(new CustomEvent('hrd:preview-clear', { detail:{ programId, year:y }}));
-        alert('저장되었습니다.'); ov.remove();
+        // 저장 즉시 부분 갱신 트리거
+        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+        alert('저장되었습니다.');
+        ov.remove();
       });
 
-      // === 파일 가져오기 / 템플릿 ===
+      // 파일 가져오기 / 템플릿 다운로드
       ov.querySelector('#bdImport')?.addEventListener('click', async ()=>{
         const f = ov.querySelector('#bdFile')?.files?.[0];
         if(!f){ alert('CSV 또는 XLSX 파일을 선택하세요.'); return; }
@@ -237,9 +237,9 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           const rows = await parseBudgetFile(f);
           if(!rows.length){ alert('가져올 데이터가 없습니다.'); return; }
           const replace = confirm('기존 행을 모두 대체할까요? (취소 = 뒤에 추가)');
-          if(replace){ items.splice(0, items.length); tbody.innerHTML=''; }
-          rows.forEach((r,idx)=>{
-            const it = {
+          if(replace) items.splice(0, items.length);
+          rows.forEach(r=>{
+            items.push({
               name:r.name||'',
               unitCost:Number(r.unitCost||0),
               qty:Number(r.qty||0),
@@ -252,13 +252,11 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
                 site:r.vendor?.site||r.url||r.site||'',
                 addr:r.vendor?.addr||r.address||'',
               }
-            };
-            const i = items.push(it) - 1;
-            tbody.insertAdjacentHTML('beforeend', rowHTML(it,i));
+            });
           });
-          attachRowHandlers();
-          redrawTotal();
-          previewToCardsAndWidgets();
+          paint();
+          // 업로드만 해도 카드 즉시 반영
+          window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
           alert('가져오기 완료');
         }catch(e){
           console.error(e); alert('가져오는 중 오류가 발생했습니다.');
@@ -268,7 +266,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       ov.querySelector('#tplCsv')?.addEventListener('click', ()=> downloadBudgetTemplate('csv'));
       ov.querySelector('#tplXlsx')?.addEventListener('click', ()=> downloadBudgetTemplate('xlsx'));
 
-      // 업체 편집 미니 모달
       function openVendorEditor(i){
         const cur = items[i].vendor || {};
         const html = `
@@ -294,37 +291,11 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             site:  mv.querySelector('#vSite').value.trim(),
             addr:  mv.querySelector('#vAddr').value.trim(),
           };
-          // 행의 업체칩만 갱신
-          const row = tbody.querySelector(`tr[data-i="${i}"] td:nth-child(6)`);
-          if (row){
-            row.innerHTML = `${vendorChip(items[i].vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}`;
-            row.querySelector('.vEdit')?.addEventListener('click', ()=> openVendorEditor(i));
-            applyVendorTips();
-          }
           mv.remove();
-          previewToCardsAndWidgets();
+          paint();
+          // 업체만 바꿔도 카드 즉시 반영
+          window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         });
-      }
-
-      // 모달 닫힐 때 프리뷰 원복
-      ov.addEventListener('close', ()=>{
-        window.dispatchEvent(new CustomEvent('hrd:preview-clear', { detail:{ programId, year:y }}));
-      });
-
-      // ====== 카드/위젯 실시간 프리뷰 반영 ======
-      function previewToCardsAndWidgets(){
-        // 1) 해당 연도 카드 즉시 업데이트
-        const card = mount.querySelector(`.it-sec[data-kind="budget"] .it-card[data-year="${y}"]`);
-        if (card) card.innerHTML = renderBudgetCard(y, { budget:{ items: items }});
-
-        // 2) 위젯 평균 프리뷰(현재 프로그램 한정 override)
-        window.dispatchEvent(new CustomEvent('hrd:preview-year', {
-          detail:{
-            programId, year: y,
-            kind: 'budget',
-            data: { budget:{ items: items } }
-          }
-        }));
       }
 
       return;
@@ -403,7 +374,10 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           updatedAt: Date.now()
         };
         await setDoc(yRef, payload, { merge:true });
-        alert('저장되었습니다.'); ov.remove();
+        // 저장 즉시 부분 갱신
+        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+        alert('저장되었습니다.');
+        ov.remove();
       });
       return;
     }
@@ -420,7 +394,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       `;
       const ov = openModal({ title:`${y} 디자인 상세`, contentHTML: html });
 
-      function repaint(){
+      const repaint=()=>{
         ov.querySelector('#galBox').innerHTML = assets.length? assets.map(u=>thumb(u,true)).join('') : '<div class="muted">자산 없음</div>';
         if (EDIT){
           ov.querySelectorAll('.delAsset').forEach(btn=>{
@@ -430,10 +404,12 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
               await updateDoc(yRef, { 'design.assetLinks': arrayRemove(url) });
               const idx = assets.indexOf(url); if (idx>-1) assets.splice(idx,1);
               repaint();
+              // 삭제 즉시 부분 갱신
+              window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
             });
           });
         }
-      }
+      };
       ov.querySelector('#up')?.addEventListener('click', async ()=>{
         const files = Array.from(ov.querySelector('#f').files||[]);
         if (!files.length) return;
@@ -444,7 +420,10 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           await updateDoc(yRef, { 'design.assetLinks': arrayUnion(url) });
           assets.push(url);
         }
-        repaint(); alert('업로드 완료');
+        repaint();
+        // 업로드 즉시 부분 갱신
+        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+        alert('업로드 완료');
       });
       repaint();
       return;
@@ -514,7 +493,7 @@ function renderDesignCard(y, v){
 
 /* ===== 파일 파서 & 템플릿 ===== */
 function headerMap(h){
-  const key = h.trim().toLowerCase();
+  const key = String(h||'').trim().toLowerCase().replace(/\ufeff/g,'');
   if (/(항목|품목|item|name)/.test(key)) return 'name';
   if (/(단가|금액|unit.?cost|price)/.test(key)) return 'unitCost';
   if (/(수량|qty|quantity)/.test(key)) return 'qty';
@@ -552,14 +531,21 @@ async function parseBudgetFile(file){
 }
 
 function parseCSV(text){
-  const rows = text.split(/\r?\n/).filter(Boolean).map(line=>{
+  const src = String(text||'').replace(/^\ufeff/,'').replace(/\r\n/g,'\n');
+  const lines = src.split('\n').filter(l => l.length>0);
+  const rows = lines.map(line=>{
     const cells = [];
     let cur = '', inQ=false;
     for (let i=0;i<line.length;i++){
       const ch = line[i];
-      if (ch === '"' ){ if (inQ && line[i+1]==='"'){ cur+='"'; i++; } else { inQ=!inQ; } }
-      else if (ch === ',' && !inQ){ cells.push(cur); cur=''; }
-      else { cur+=ch; }
+      if (ch === '"' ){
+        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        else { inQ=!inQ; }
+      } else if (ch === ',' && !inQ){
+        cells.push(cur); cur='';
+      } else {
+        cur+=ch;
+      }
     }
     cells.push(cur);
     return cells.map(s=>s.trim());
@@ -572,7 +558,10 @@ function rowsFromAOA(rows){
   const head = rows[0].map(headerMap);
   return rows.slice(1).filter(r=>r.some(c=>String(c||'').trim().length)).map(r=>{
     const obj = {};
-    head.forEach((k,idx)=>{ if(!k) return; obj[k] = r[idx]; });
+    head.forEach((k,idx)=>{
+      if(!k) return;
+      obj[k] = r[idx];
+    });
     const vendor = (obj.vendor||obj.company) ? { name:obj.vendor||obj.company } : {};
     if (obj.email) vendor.email = obj.email;
     if (obj.phone) vendor.phone = obj.phone;
@@ -588,20 +577,32 @@ function rowsFromAOA(rows){
   });
 }
 
+function csvEscapeField(s){
+  const needs = /[",\n]/.test(s);
+  if (!needs) return s;
+  return `"${s.replace(/"/g,'""')}"`;
+}
+
 function downloadBudgetTemplate(kind='csv'){
   const headers = ['항목','단가','수량','비고','업체','email','phone','site','address'];
   const sample = [
-    ['장소 대관','500000','1','1일 기준','A 컨벤션','sales@a.co','02-000-0000','https://a.co','서울시 …'],
+    ['장소 대관','500000','1','1일 기준','A 컨벤션','sales@a.co','02-000-0000','https://a.co','서울시 ○○구 ○○로 12'],
     ['강사료','800000','1','부가세 포함','홍길동','','','',''],
     ['디자인','300000','1','배너/안내물','디자인랩','hello@design.com','','https://design.com',''],
   ];
+
   if (kind==='csv'){
-    const csv = [headers.join(','), ...sample.map(r=>r.map(s=>(/,|"/.test(s)?`"${s.replace(/"/g,'""')}"`:s)).join(','))].join('\n');
+    const bom = '\uFEFF';
+    const lines = [];
+    lines.push(headers.map(csvEscapeField).join(','));
+    sample.forEach(r=> lines.push(r.map(v=>csvEscapeField(String(v))).join(',')));
+    const csv = bom + lines.join('\r\n');
     const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
     const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='budget-template.csv'; a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),2000);
     return;
   }
+
   (async ()=>{
     let XLSX = (globalThis.XLSX)||null;
     if(!XLSX){
@@ -609,7 +610,13 @@ function downloadBudgetTemplate(kind='csv'){
       catch(e){ alert('XLSX 모듈을 불러올 수 없어 CSV 템플릿만 제공합니다.'); return; }
     }
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...sample]);
+    const wsData = [headers, ...sample];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const colWidths = headers.map((h,idx)=>{
+      const maxLen = wsData.reduce((m,row)=> Math.max(m, String(row[idx]??'').length), h.length);
+      return { wch: Math.min(30, Math.max(10, Math.ceil(maxLen*1.2))) };
+    });
+    ws['!cols'] = colWidths;
     XLSX.utils.book_append_sheet(wb, ws, 'Budget');
     XLSX.writeFile(wb, 'budget-template.xlsx');
   })();
