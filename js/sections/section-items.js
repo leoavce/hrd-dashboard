@@ -516,7 +516,8 @@ async function parseBudgetFile(file){
     let XLSX = (globalThis.XLSX)||null;
     if(!XLSX){
       try{
-        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default;
+        // ✅ 올바른 경로로 수정
+        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs')).default;
       }catch(e){
         console.warn('XLSX 모듈 로드 실패, CSV만 지원됩니다.'); throw new Error('XLSX 모듈 로드 실패');
       }
@@ -606,7 +607,10 @@ function downloadBudgetTemplate(kind='csv'){
   (async ()=>{
     let XLSX = (globalThis.XLSX)||null;
     if(!XLSX){
-      try{ XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mjs')).default; }
+      try{
+        // ✅ 올바른 경로로 수정
+        XLSX = (await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs')).default;
+      }
       catch(e){ alert('XLSX 모듈을 불러올 수 없어 CSV 템플릿만 제공합니다.'); return; }
     }
     const wb = XLSX.utils.book_new();
