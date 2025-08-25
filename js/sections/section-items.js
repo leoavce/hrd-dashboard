@@ -188,13 +188,28 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           tbody.querySelectorAll('input[data-i]').forEach(inp=>{
             const handler = ()=>{
               const i = +inp.dataset.i, k = inp.dataset.k;
-              if (k==='name' || k==='note'){ items[i][k] = inp.value; }
-              else { items[i][k] = Number(inp.value||0); }
+              if (k==='name' || k==='note'){
+                items[i][k] = inp.value;
+              }else{
+                // 숫자 필드는 자연스러운 좌→우 입력을 위해, 커서를 항상 맨 뒤로 복원
+                items[i][k] = Number(inp.value||0);
+              }
               items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
-              const pos = inp.selectionStart;
+
+              // === 커서 복원 로직 ===
+              const isNum = (k==='unitCost' || k==='qty');
+              const desiredCaret = isNum ? String(inp.value||'').length : inp.selectionStart;
+
               paint();
+
               const again = tbody.querySelector(`input[data-i="${i}"][data-k="${k}"]`);
-              if (again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(_){} }
+              if (again){
+                again.focus();
+                try{
+                  const pos = isNum ? String(again.value||'').length : desiredCaret;
+                  again.setSelectionRange(pos, pos);
+                }catch(_){}
+              }
             };
             inp.addEventListener('input', handler);
           });
@@ -216,8 +231,8 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const rowHTML=(it,i)=>`
         <tr>
           <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
-          <td>${EDIT?`<input type="number" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
-          <td>${EDIT?`<input type="number" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
+          <td>${EDIT?`<input type="number" inputmode="numeric" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
+          <td>${EDIT?`<input type="number" inputmode="numeric" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
           <td>${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
           <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
           <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
@@ -662,7 +677,7 @@ function parseCSV(text){
     for (let i=0;i<line.length;i++){
       const ch = line[i];
       if (ch === '"' ){
-        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        if (inQ && line[i+1]===""){ cur+='"'; i++; }
         else { inQ=!inQ; }
       } else if (ch === ',' && !inQ){
         cells.push(cur); cur='';
