@@ -1,5 +1,5 @@
 // js/sections/section-items.js
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { loadYears, fmt } from "../utils/helpers.js";
 import { openModal } from "../utils/modal.js";
@@ -92,6 +92,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   /* ---------- 딥링크 상세 열기(검색/해시에서 detail=1로 진입 시) ---------- */
   const mapSectionId = (sec)=>{
+    // items:content → content 등으로 맵핑
     const m = {
       'items:content':'content',
       'items:budget':'budget',
@@ -106,6 +107,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const { section, year } = e.detail || {};
     const kind = mapSectionId(section);
     if (!['content','budget','outcome','design'].includes(kind)) return;
+    // year 없으면 첫 번째 연도로 폴백
     const y = year || (years && years[0]);
     if (y) openDetail(kind, y);
   };
@@ -118,11 +120,15 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const v = snap.exists()? snap.data(): {};
 
     if (kind==='content'){
-      const html = `<textarea id="cOutline" style="width:100%;min-height:320px" ${EDIT?'':'readonly'}>${esc(v?.content?.outline||'')}</textarea>`;
-      const ov = openModal({ title:`${y} 교육 내용 상세`, contentHTML: html, footerHTML: EDIT? `<button class="om-btn primary" id="save">저장</button>`:'' });
+      // 리치 텍스트(간단 RTE): contenteditable로 HTML 저장, 카드 프리뷰는 텍스트만 추출
+      const html = EDIT
+        ? `<div id="cHtml" class="rte" contenteditable="true">${v?.content?.outlineHtml || esc(v?.content?.outline||'')}</div>
+           <div style="margin-top:10px"><button class="om-btn primary" id="save">저장</button></div>`
+        : `<div class="rte-view">${v?.content?.outlineHtml || esc(v?.content?.outline||'(내용 없음)')}</div>`;
+      const ov = openModal({ title:`${y} 교육 내용 상세`, contentHTML: html });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
-        const val = ov.querySelector('#cOutline').value;
-        await setDoc(yRef, { content:{ outline:val }, updatedAt: Date.now() }, { merge:true });
+        const valHtml = ov.querySelector('#cHtml').innerHTML.trim();
+        await setDoc(yRef, { content:{ outlineHtml:valHtml }, updatedAt: Date.now() }, { merge:true });
         window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         alert('저장되었습니다.');
         ov.remove();
@@ -180,32 +186,54 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         ? `<span class="v-chip" data-vendor='${encodeURIComponent(JSON.stringify(v))}'>${esc(v.name)}</span>`
         : `<span class="muted small">-</span>`;
 
+      const recomputeTotal = ()=>{
+        const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
+        totalEl.textContent = fmt.format(total);
+      };
+
+      const rowHTML=(it,i)=>`
+        <tr data-i="${i}">
+          <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
+          <td>${EDIT?`<input type="text" inputmode="numeric" pattern="[0-9]*" class="num" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
+          <td>${EDIT?`<input type="text" inputmode="numeric" pattern="[0-9]*" class="num" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
+          <td data-role="subtotal">${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
+          <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
+          <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
+          ${EDIT?`<td><button class="om-btn delRow" data-i="${i}">삭제</button></td>`:''}
+        </tr>`;
+
       const paint=()=>{
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
         if (EDIT){
-          // 숫자/텍스트 입력: 테이블 리렌더 없이 해당 셀/합계만 갱신
-          tbody.querySelectorAll('input[data-i]').forEach(inp=>{
-            const handler = ()=>{
+          // 이름/비고는 바로 값만 반영, 재페인트 없음
+          tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{
+            inp.addEventListener('input', ()=>{
               const i = +inp.dataset.i, k = inp.dataset.k;
-              if (k==='name' || k==='note'){
-                items[i][k] = inp.value;
-              }else{
-                // 숫자만 허용(붙여넣기 등 방지), 빈값이면 0
-                const raw = (inp.value||'').replace(/[^\d]/g,'');
-                inp.value = raw; // 시각 동기화
-                items[i][k] = raw === '' ? 0 : Number(raw);
-              }
-              // 소계/합계 즉시 갱신(무리한 repaint 금지)
-              items[i].subtotal = (Number(items[i].unitCost)||0) * (Number(items[i].qty)||0);
-              const row = inp.closest('tr');
-              row?.querySelector('.subtotal')?.replaceChildren(document.createTextNode(fmt.format(items[i].subtotal)));
-              const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
-              totalEl.textContent = fmt.format(total);
-            };
-            inp.addEventListener('input', handler);
+              items[i][k] = inp.value;
+            });
           });
 
-          // 행 삭제/업체 편집은 구조가 바뀌므로 paint() 호출
+          // 숫자 입력은 재페인트 없이 셀만 갱신 (커서 뒤집힘 방지)
+          const sanitize = (s)=> String(s||'').replace(/[^\d.]/g,'');
+          const updateRow = (i)=>{
+            const row = tbody.querySelector(`tr[data-i="${i}"]`);
+            if (!row) return;
+            const subTd = row.querySelector('[data-role="subtotal"]');
+            const it = items[i];
+            it.subtotal = (Number(it.unitCost)||0) * (Number(it.qty)||0);
+            if (subTd) subTd.textContent = fmt.format(it.subtotal);
+            recomputeTotal();
+          };
+          tbody.querySelectorAll('input.num[data-i]').forEach(inp=>{
+            inp.addEventListener('input', ()=>{
+              const i = +inp.dataset.i, k = inp.dataset.k;
+              const v = sanitize(inp.value);
+              inp.value = v;
+              items[i][k] = Number(v||0);
+              updateRow(i);
+            });
+          });
+
           tbody.querySelectorAll('.delRow')?.forEach(btn=>{
             btn.addEventListener('click', ()=>{ const i=+btn.dataset.i; items.splice(i,1); paint(); });
           });
@@ -213,36 +241,21 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             btn.addEventListener('click', ()=> openVendorEditor(+btn.dataset.i));
           });
         }
-        const total = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
-        totalEl.textContent = fmt.format(total);
+        recomputeTotal();
+
+        // 툴팁
         tbody.querySelectorAll('.v-chip').forEach(ch=>{
           const data = JSON.parse(decodeURIComponent(ch.dataset.vendor||'%7B%7D'));
           attachVendorTip(ch, data);
         });
       };
 
-      const rowHTML=(it,i)=>`
-        <tr>
-          <td>${EDIT?`<input data-i="${i}" data-k="name" value="${esc(it.name)}">`:`${esc(it.name)}`}</td>
-          <td>${EDIT?`<input class="num" type="text" inputmode="numeric" data-i="${i}" data-k="unitCost" value="${it.unitCost}">`:`${fmt.format(it.unitCost)}`}</td>
-          <td>${EDIT?`<input class="num" type="text" inputmode="numeric" data-i="${i}" data-k="qty" value="${it.qty}">`:`${it.qty}`}</td>
-          <td class="subtotal" data-i="${i}">${fmt.format((Number(it.unitCost)||0)*(Number(it.qty)||0))}</td>
-          <td>${EDIT?`<input data-i="${i}" data-k="note" value="${esc(it.note)}">`:`${esc(it.note)}`}</td>
-          <td>${vendorChip(it.vendor)} ${EDIT?`<button class="om-btn vEdit" data-i="${i}">업체</button>`:''}</td>
-          ${EDIT?`<td><button class="om-btn delRow" data-i="${i}">삭제</button></td>`:''}
-        </tr>`;
-
       paint();
 
-      ov.querySelector('#addRow')?.addEventListener('click', ()=>{
-        items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}});
-        paint();
-      });
+      ov.querySelector('#addRow')?.addEventListener('click', ()=>{ items.push({name:'',unitCost:0,qty:0,subtotal:0,note:'',vendor:{}}); paint(); });
       ov.querySelector('#save')?.addEventListener('click', async ()=>{
         const cleaned = items.map(it=>({
           ...it,
-          unitCost: Number(it.unitCost)||0,
-          qty: Number(it.qty)||0,
           subtotal:(Number(it.unitCost)||0)*(Number(it.qty)||0),
           vendor: it.vendor || {}
         }));
@@ -313,6 +326,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             addr:  mv.querySelector('#vAddr').value.trim(),
           };
           mv.remove();
+          // 재페인트(업체칩 렌더 필요)
           paint();
           window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         });
@@ -402,7 +416,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     }
 
     if (kind==='design'){
-      // ------- (디자인 탭: 저장/취소 추가, 이미지/텍스트/메모) -------
+      // ------- (디자인 탭: 이미지 클릭 시 다운로드 + 텍스트 우선 정렬) -------
       const legacy = (v?.design?.assetLinks||[]).map(u=>({ id: crypto.randomUUID(), type:'img', url:u, memo:'' }));
       const originAssets = Array.isArray(v?.design?.assets) ? v.design.assets.slice() : legacy;
       let assets = originAssets.map(a=>({ ...a }));
@@ -465,7 +479,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         }
         return `
           <div class="gcard" data-i="${i}">
-            <figure class="gimg"><img src="${a.url}" alt="asset"></figure>
+            <figure class="gimg"><a href="${a.url}" download><img src="${a.url}" alt="asset"></a></figure>
             ${a.memo?`<div class="gmemo">${esc(a.memo)}</div>`:''}
             ${EDIT?`
               <div class="gedit">
@@ -477,8 +491,10 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       };
 
       const paint = ()=>{
-        gal.innerHTML = assets.length
-          ? assets.map(card).join('')
+        // 텍스트 먼저 나오도록 정렬
+        const view = assets.slice().sort(a=> a.type==='text' ? -1 : 1);
+        gal.innerHTML = view.length
+          ? view.map(card).join('')
           : `<div class="muted">자산 없음</div>`;
 
         if (!EDIT) return;
@@ -575,10 +591,14 @@ function block(title, kind){
   `;
 }
 function renderContentCard(y, v){
-  const ol = (v?.content?.outline||'').split('\n').slice(0,3).map(s=>`<li>${esc(s)}</li>`).join('');
+  // 불릿 강제 제거 → 텍스트 스니펫을 간결히
+  const html = v?.content?.outlineHtml || '';
+  const plain = html ? stripTags(html) : (v?.content?.outline||'');
+  const lines = plain.split('\n').map(s=>s.trim()).filter(Boolean);
+  const snippet = lines.slice(0,3).join(' ');
   return `
     <div class="cap">${y}</div>
-    <ul class="bul">${ol || '<li>내용 미입력</li>'}</ul>
+    <div class="txt-snippet">${esc(snippet || '내용 미입력')}</div>
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
@@ -613,12 +633,13 @@ function renderDesignCard(y, v){
   const norm = Array.isArray(v?.design?.assets)
     ? v.design.assets
     : (v?.design?.assetLinks||[]).map(u=>({ type:'img', url:u, memo:'' }));
-  const three = norm.slice(0,3);
-  const cells = three.map(a=>{
+  // 텍스트 먼저, 그리고 이미지(미리보기 3개)
+  const view = norm.slice().sort(a=> a.type==='text' ? -1 : 1).slice(0,3);
+  const cells = view.map(a=>{
     if (a.type==='text'){
       return `<div class="thumb text"><div class="tx">${esc(a.text||'텍스트')}${a.href?` <span class="link-hint">↗</span>`:''}</div>${a.memo?`<div class="mini-memo">${esc(a.memo)}</div>`:''}</div>`;
     }
-    return `<div class="thumb"><img src="${a.url}" alt=""><div class="mini-memo">${esc(a.memo||'')}</div></div>`;
+    return `<div class="thumb"><a href="${a.url}" download><img src="${a.url}" alt=""><div class="mini-memo">${esc(a.memo||'')}</div></a></div>`;
   }).join('');
   return `
     <div class="cap">${y}</div>
@@ -798,8 +819,11 @@ function ensureStyle(){
   .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
   .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  /* 숫자 인풋 보정 */
-  input.num{ text-align:right; direction:ltr; }
+  .txt-snippet{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+
+  /* 리치텍스트 간단 스타일 */
+  .rte, .rte-view{min-height:240px; padding:12px; border:1px solid var(--line); background:#0f1b22; border-radius:8px}
+  .rte:focus{outline:2px solid #3e68ff}
 
   /* 디자인 갤러리(상세) */
   .gal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
@@ -817,6 +841,7 @@ function ensureStyle(){
   .gal{display:flex; gap:8px; flex-wrap:wrap}
   .gal .thumb{width:90px; height:70px; border-radius:8px; overflow:hidden; background:#0b141e; border:1px solid var(--line); position:relative}
   .gal .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .gal .thumb a{display:block; width:100%; height:100%}
   .gal .thumb.text{display:flex; align-items:center; justify-content:center; padding:6px; color:#eaf2ff; font-size:.82rem; text-align:center}
   .gal .thumb .mini-memo{position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); color:#fff; font-size:.72rem; padding:2px 6px}
   .link-hint{opacity:.8}
@@ -825,3 +850,4 @@ function ensureStyle(){
   document.head.appendChild(s);
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function stripTags(html){ return String(html||'').replace(/<\/?[^>]+(>|$)/g, ''); }
