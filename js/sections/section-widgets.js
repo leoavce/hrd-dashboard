@@ -55,22 +55,23 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
   }
 
   function mergedAssetsFrom(ymap){
-    // 각 연도의 design.assets(type:'img') 및 레거시 assetLinks 수집
-    const list = [];
+    // 각 연도의 design.assets(type:'img') 및 레거시 assetLinks 수집 + 중복 제거
+    const set = new Set();
+    const push = (u)=>{ if(u) set.add(u); };
     for (const y of years){
       const d = (ymap[y]?.design)||{};
       if (Array.isArray(d.assets)){
-        d.assets.forEach(a=>{ if (a?.type==='img' && a.url) list.push(a.url); });
+        d.assets.forEach(a=>{ if (a?.type==='img' && a.url) push(a.url); });
       }
       if (Array.isArray(d.assetLinks)){
-        d.assetLinks.forEach(u=> list.push(u));
+        d.assetLinks.forEach(push);
       }
     }
     // 단일문서(레거시)도 보조로 포함
     if (Array.isArray(single?.design?.assetLinks)){
-      single.design.assetLinks.forEach(u=> list.push(u));
+      single.design.assetLinks.forEach(push);
     }
-    return list;
+    return Array.from(set);
   }
 
   function paint(){
@@ -93,7 +94,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
         ${(budgetAverages.items || []).slice(0,4).map(it=>`
           <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
-        `).join('')}
+        ).join('')}
       </div>
     `,'openBudget'));
 
@@ -107,7 +108,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     if (enabled.includes('design')) tiles.push(tile('포함 디자인', `
       <div class="gal">
-        ${randomAssets.map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">디자인 자산이 없습니다.</div>`}
+        ${randomAssets.map(url => `<div class="thumb"><a href="${url}" download><img src="${url}" alt="asset"/></a></div>`).join('') || `<div class="muted">디자인 자산이 없습니다.</div>`}
       </div>
     `,'openGallery'));
 
@@ -124,25 +125,31 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       const ov = openModal({ title:'교육 내용 전반 요약', contentHTML:content, footerHTML: EDIT ? `<button class="om-btn primary" id="wgSave">저장</button>` : '' });
       ov.querySelector('#wgSave')?.addEventListener('click', async ()=>{
         const val = ov.querySelector('#wgTxt').value;
-        await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote: val, updatedAt: Date.now() }, { merge:true });
-        alert('저장되었습니다.'); ov.remove();
+        try{
+          await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote: val, updatedAt: Date.now() }, { merge:true });
+          // 로컬 캐시 갱신 + 이벤트 알림
+          if (summary) summary.widgetNote = val;
+          window.dispatchEvent(new CustomEvent('hrd:summary-updated', { detail:{ programId } }));
+          alert('저장되었습니다.'); ov.remove();
+        }catch(e){
+          console.error(e); alert('저장 실패');
+        }
       });
     });
 
-    // 예산 평균 상세
+    // 예산 평균 상세 (연도 구분 없이 동일 항목 평균 + 단일 항목은 "기타"로 집계)
     mount.querySelector('[data-act="openBudget"]')?.addEventListener('click', ()=>{
-      const rows = [['연도','항목','금액(원)']];
-      for (const y of years) {
-        const v = (ymap[y]?.budget?.items || []);
-        v.forEach(it=> rows.push([y, it.name||'', fmt.format(Number(it.subtotal||0))]));
-      }
+      const rows = calcSameItemAverages(ymap); // [{name, avg, count}]
       const content = `
         <div class="mini-table" style="margin-bottom:8px">
-          <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(Math.round(budgetAverages.totalAvg||0))} 원</b></div></div>
+          <div class="row"><div><b>설명</b></div><div><b>동일 항목 간 금액 평균(연도 무관)</b></div></div>
         </div>
-        <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
+        <table class="x-table">
+          <tr><th>항목</th><th>평균(원)</th><th>표본 수</th></tr>
+          ${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${fmt.format(Math.round(r.avg||0))}</td><td>${r.count}</td></tr>`).join('')}
+        </table>
       `;
-      openModal({ title:'예산안 평균 상세', contentHTML:content });
+      openModal({ title:'예산안 항목별 평균', contentHTML:content });
     });
 
     // 성과 평균 상세
@@ -163,9 +170,9 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       openModal({ title:'교육 성과 전반 요약 상세', contentHTML:content });
     });
 
-    // 갤러리
+    // 갤러리 (중복 제거 + 이미지 클릭 시 다운로드)
     mount.querySelector('[data-act="openGallery"]')?.addEventListener('click', ()=>{
-      const content = `<div class="gal gal-lg">${(gallery||[]).map(url => `<div class="thumb"><img src="${url}" alt="asset"/></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
+      const content = `<div class="gal gal-lg">${(gallery||[]).map(url => `<div class="thumb"><a href="${url}" download><img src="${url}" alt="asset"/></a></div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}</div>`;
       openModal({ title:'포함 디자인 갤러리', contentHTML:content });
     });
   }
@@ -209,6 +216,36 @@ function calcBudgetAverage(ymap){
   }).sort((a,b)=> b.avg-a.avg);
   const totalAvg = totals.reduce((s,v)=>s+v,0)/(totals.length||1);
   return { totalAvg, items: itemsAvg };
+}
+
+/** 연도 구분 없이 동일 항목 평균(표본 2개 이상) + 나머지는 기타로 묶기 */
+function calcSameItemAverages(ymap){
+  const map = new Map(); // key(lowercased name) -> [values]
+  const label = new Map(); // key -> original name (최근값)
+  for(const y in ymap){
+    for (const it of (ymap[y]?.budget?.items||[])){
+      const nameRaw = (it?.name||'').trim();
+      if (!nameRaw) continue;
+      const key = nameRaw.toLowerCase();
+      label.set(key, nameRaw);
+      const val = Number(it?.subtotal||0);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(val);
+    }
+  }
+  const rows=[], singles=[];
+  map.forEach((arr,key)=>{
+    if (arr.length>=2){
+      const avg = arr.reduce((a,b)=>a+b,0)/arr.length;
+      rows.push({ name: label.get(key)||key, avg, count: arr.length });
+    }else{
+      singles.push(arr[0]);
+    }
+  });
+  if (singles.length){
+    rows.push({ name:'기타', avg: singles.reduce((a,b)=>a+b,0)/singles.length, count: singles.length });
+  }
+  return rows.sort((a,b)=> b.avg-a.avg);
 }
 
 function calcOutcomeAverage(ymap){
