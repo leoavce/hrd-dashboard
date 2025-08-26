@@ -42,7 +42,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   function initCarousel(kind, renderer){
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
-    const yBox  = mount.querySelector(`[data-kind="${kind}"] .years`);
+    const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
     let index = 0;
     const clamp = v => Math.max(0, Math.min(years.length-3, v));
     const slice = ()=> {
@@ -120,19 +120,42 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const v = snap.exists()? snap.data(): {};
 
     if (kind==='content'){
-      // 간단 RTE(contenteditable)로 HTML 저장, 카드 프리뷰는 텍스트 스니펫
-      const html = EDIT
-        ? `<div id="cHtml" class="rte" contenteditable="true">${v?.content?.outlineHtml || esc(v?.content?.outline||'')}</div>
-           <div style="margin-top:10px"><button class="om-btn primary" id="save">저장</button></div>`
-        : `<div class="rte-view">${v?.content?.outlineHtml || esc(v?.content?.outline||'(내용 없음)')}</div>`;
+      // 노션스러운 경량 RTE + 툴바
+      const isEdit = EDIT;
+      const safeHtml = v?.content?.outlineHtml || esc(v?.content?.outline||'');
+      const html = `
+        <div class="rte-toolbar ${isEdit?'':'hidden'}">
+          <button class="rtb" data-cmd="bold" title="굵게"><b>B</b></button>
+          <button class="rtb" data-cmd="italic" title="기울임"><i>I</i></button>
+          <span class="sep"></span>
+          <button class="rtb" data-block="H1" title="제목 1">H1</button>
+          <button class="rtb" data-block="H2" title="제목 2">H2</button>
+          <span class="sep"></span>
+          <button class="rtb" data-cmd="insertUnorderedList" title="글머리 목록">• List</button>
+          <button class="rtb" data-cmd="insertOrderedList" title="번호 목록">1. List</button>
+          <button class="rtb" data-block="QUOTE" title="콜아웃">❝</button>
+          <span class="sep"></span>
+          <button class="rtb" data-cmd="strikeThrough" title="취소선">S̶</button>
+          <button class="rtb" data-cmd="createLink" title="링크">🔗</button>
+        </div>
+        ${isEdit
+          ? `<div id="cHtml" class="rte" contenteditable="true">${safeHtml}</div>
+             <div style="margin-top:10px"><button class="om-btn primary" id="save">저장</button></div>`
+          : `<div class="rte-view">${safeHtml || '(내용 없음)'}</div>`
+        }
+      `;
       const ov = openModal({ title:`${y} 교육 내용 상세`, contentHTML: html });
-      ov.querySelector('#save')?.addEventListener('click', async ()=>{
-        const valHtml = ov.querySelector('#cHtml').innerHTML.trim();
-        await setDoc(yRef, { content:{ outlineHtml:valHtml }, updatedAt: Date.now() }, { merge:true });
-        window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
-        alert('저장되었습니다.');
-        ov.remove();
-      });
+
+      if (isEdit){
+        initToolbar(ov);
+        ov.querySelector('#save')?.addEventListener('click', async ()=>{
+          const valHtml = ov.querySelector('#cHtml').innerHTML.trim();
+          await setDoc(yRef, { content:{ outlineHtml:valHtml }, updatedAt: Date.now() }, { merge:true });
+          window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
+          alert('저장되었습니다.');
+          ov.remove();
+        });
+      }
       return;
     }
 
@@ -205,15 +228,12 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const paint=()=>{
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
         if (EDIT){
-          // 이름/비고는 바로 값만 반영, 재페인트 없음
-          tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{ 
-            inp.addEventListener('input', ()=>{ 
-              const i = +inp.dataset.i, k = inp.dataset.k; 
-              items[i][k] = inp.value;
-            });
+          // 이름/비고는 바로 반영
+          tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{
+            inp.addEventListener('input', ()=>{ const i=+inp.dataset.i, k=inp.dataset.k; items[i][k] = inp.value; });
           });
 
-          // 숫자 입력은 재페인트 없이 셀만 갱신 (커서 뒤집힘 방지)
+          // 숫자 입력은 재페인트 없이 셀/합계만 갱신
           const sanitize = (s)=> String(s||'').replace(/[^\d.]/g,'');
           const updateRow = (i)=>{
             const row = tbody.querySelector(`tr[data-i="${i}"]`);
@@ -326,7 +346,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             addr:  mv.querySelector('#vAddr').value.trim(),
           };
           mv.remove();
-          // 재페인트(업체 칩 갱신)
           paint();
           window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         });
@@ -416,7 +435,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     }
 
     if (kind==='design'){
-      // ------- (디자인 탭: 이미지 클릭 시 다운로드 + 텍스트 우선 정렬) -------
+      // ------- (디자인 탭: 이미지 강제 다운로드 + 텍스트 우선 정렬) -------
       const legacy = (v?.design?.assetLinks||[]).map(u=>({ id: crypto.randomUUID(), type:'img', url:u, memo:'' }));
       const originAssets = Array.isArray(v?.design?.assets) ? v.design.assets.slice() : legacy;
       let assets = originAssets.map(a=>({ ...a }));
@@ -479,7 +498,11 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         }
         return `
           <div class="gcard" data-i="${i}">
-            <figure class="gimg"><a href="${a.url}" download><img src="${a.url}" alt="asset"></a></figure>
+            <figure class="gimg">
+              <button class="dl-btn" data-url="${a.url}" title="다운로드" aria-label="다운로드">
+                <img src="${a.url}" alt="asset">
+              </button>
+            </figure>
             ${a.memo?`<div class="gmemo">${esc(a.memo)}</div>`:''}
             ${EDIT?`
               <div class="gedit">
@@ -497,19 +520,21 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
           ? view.map(card).join('')
           : `<div class="muted">자산 없음</div>`;
 
+        // 다운로드 핸들러(상세)
+        gal.querySelectorAll('.dl-btn').forEach(btn=>{
+          btn.addEventListener('click', async ()=>{
+            const url = btn.dataset.url;
+            await forceDownload(url, `${programId}-${y}.jpg`);
+          });
+        });
+
         if (!EDIT) return;
 
         gal.querySelectorAll('.gcard').forEach(box=>{
           const i = +box.dataset.i;
-          box.querySelector('.gm')?.addEventListener('input', (e)=>{
-            assets[i].memo = e.target.value;
-          });
-          box.querySelector('.gtxt')?.addEventListener('input', (e)=>{
-            assets[i].text = e.target.value;
-          });
-          box.querySelector('.ghref')?.addEventListener('input', (e)=>{
-            assets[i].href = e.target.value;
-          });
+          box.querySelector('.gm')?.addEventListener('input', (e)=>{ assets[i].memo = e.target.value; });
+          box.querySelector('.gtxt')?.addEventListener('input', (e)=>{ assets[i].text = e.target.value; });
+          box.querySelector('.ghref')?.addEventListener('input', (e)=>{ assets[i].href = e.target.value; });
           box.querySelector('.gdel')?.addEventListener('click', ()=>{
             const a = assets[i];
             if (a.type==='img' && a.url) pendingDeleteUrls.add(a.url);
@@ -591,7 +616,7 @@ function block(title, kind){
   `;
 }
 function renderContentCard(y, v){
-  // 불릿 강제 제거 → 텍스트 스니펫을 간결히
+  // 불릿 강제 제거 → 텍스트 스니펫을 간결히(카드 터짐 방지)
   const html = v?.content?.outlineHtml || '';
   const plain = html ? stripTags(html) : (v?.content?.outline||'');
   const lines = plain.split('\n').map(s=>s.trim()).filter(Boolean);
@@ -639,13 +664,19 @@ function renderDesignCard(y, v){
     if (a.type==='text'){
       return `<div class="thumb text"><div class="tx">${esc(a.text||'텍스트')}${a.href?` <span class="link-hint">↗</span>`:''}</div>${a.memo?`<div class="mini-memo">${esc(a.memo)}</div>`:''}</div>`;
     }
-    return `<div class="thumb"><a href="${a.url}" download><img src="${a.url}" alt=""><div class="mini-memo">${esc(a.memo||'')}</div></a></div>`;
+    return `<div class="thumb">
+      <button class="dl-btn" data-url="${a.url}" title="다운로드"><img src="${a.url}" alt=""><div class="mini-memo">${esc(a.memo||'')}</div></button>
+    </div>`;
   }).join('');
-  return `
+  const html = `
     <div class="cap">${y}</div>
     <div class="gal">${cells || '<div class="muted">자산 없음</div>'}</div>
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
+
+  // 다운로드 바인딩은 섹션 렌더 시점에 불가 → 이벤트 위임을 위해 래퍼 사용 필요
+  // 여기서는 마크업만 반환한다. 클릭 핸들링은 ensureStyle() 내부에서 전역 위임 처리.
+  return html;
 }
 
 /* ===== 파일 파서 & 템플릿 ===== */
@@ -779,6 +810,26 @@ function downloadBudgetTemplate(kind='csv'){
   })();
 }
 
+/* ===== 공용: 강제 다운로드 ===== */
+async function forceDownload(url, filename='download'){
+  try{
+    const r = await fetch(url, { credentials:'omit' });
+    if(!r.ok) throw new Error('fetch failed');
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }catch(e){
+    // 폴백: download 속성 시도 후 새탭
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.target='_blank'; a.rel='noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+}
+
 /* ===== 업체 툴팁 ===== */
 function attachVendorTip(anchor, vendor){
   let tip;
@@ -807,30 +858,66 @@ function attachVendorTip(anchor, vendor){
   anchor.addEventListener('mouseleave', hide);
 }
 
+/* ===== RTE 툴바 유틸 ===== */
+function initToolbar(root){
+  const ed = root.querySelector('#cHtml');
+  const exec = (cmd, val=null)=> document.execCommand(cmd,false,val);
+  root.querySelectorAll('.rte-toolbar .rtb[data-cmd]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (b.dataset.cmd==='createLink'){
+        const url = prompt('링크 URL'); if (url) exec('createLink', url);
+      } else {
+        exec(b.dataset.cmd);
+      }
+      ed?.focus();
+    });
+  });
+  root.querySelectorAll('.rte-toolbar .rtb[data-block]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const t=b.dataset.block;
+      if (t==='H1') exec('formatBlock','H1');
+      else if (t==='H2') exec('formatBlock','H2');
+      else if (t==='QUOTE') exec('formatBlock','BLOCKQUOTE');
+      ed?.focus();
+    });
+  });
+}
+
 /* ===== 유틸/스타일 ===== */
 function ensureStyle(){
   if (document.getElementById('it-style')) return;
   const s = document.createElement('style'); s.id='it-style';
   s.textContent = `
   .sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}
+
+  /* 카드 그리드 & 고정 높이(터짐 방지) */
+  .it-sec .cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .it-card{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; padding:12px;
+            min-height:190px; max-height:190px; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
+  .it-card .cap{ font-weight:700; color:#eaf2ff; flex:0 0 auto; }
+  .it-card .ft{ flex:0 0 auto; }
+  .txt-snippet{white-space:normal; word-break:break-word; overflow:hidden;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; line-height:1.4; }
+
   .importer .linklike{background:none;border:0;color:#8fb7ff;cursor:pointer;text-decoration:underline}
   .v-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;background:#132235;color:#dbebff;font-size:.86rem}
   .mini-badge{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:#132235;border:1px solid var(--line);font-size:.8rem;color:#cfe2ff}
   .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
   .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  /* 카드 깨짐 방지 + 스니펫 한줄 */
-  .txt-snippet{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-
-  /* 리치텍스트 간단 스타일 */
-  .rte, .rte-view{min-height:240px; padding:12px; border:1px solid var(--line); background:#0f1b22; border-radius:8px}
+  /* RTE */
+  .rte-toolbar{display:flex; gap:6px; align-items:center; margin-bottom:8px}
+  .rte-toolbar .rtb{padding:6px 8px; border:1px solid var(--line); background:#0c1522; color:#eaf2ff; border-radius:8px; cursor:pointer}
+  .rte-toolbar .sep{width:8px; height:1px; background:#2a3a45; display:inline-block}
+  .rte, .rte-view{min-height:240px; padding:12px; border:1px solid var(--line); background:#0f1b22; border-radius:8px; max-height:62vh; overflow:auto}
   .rte:focus{outline:2px solid #3e68ff}
 
   /* 디자인 갤러리(상세) */
   .gal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
   .gcard{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
-  .gimg{width:100%; aspect-ratio: 4/3; overflow:hidden; background:#0b141e;}
+  .gimg{width:100%; aspect-ratio: 4/3; overflow:hidden; background:#0b141e; border-bottom:1px solid var(--line);}
   .gimg img{width:100%; height:100%; object-fit:cover; display:block;}
+  .gimg .dl-btn{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
   .gtext{padding:14px 12px;}
   .gtext-main{font-weight:700; color:#eaf2ff; word-break:break-word;}
   .gmemo{padding:8px 12px; border-top:1px dashed #223246; color:#cfe2ff; font-size:.9rem;}
@@ -838,17 +925,25 @@ function ensureStyle(){
   .ginp{flex:1; min-width:0}
   .gal-actions{margin-bottom:10px}
 
-  /* 카드(요약) 갤러리 스타일 보정 */
-  .gal{display:flex; gap:8px; flex-wrap:wrap}
+  /* 카드(요약) 갤러리 스타일 보정 : 바둑판 */
+  .gal{display:grid; grid-template-columns:repeat(3, 90px); gap:8px; align-items:start}
   .gal .thumb{width:90px; height:70px; border-radius:8px; overflow:hidden; background:#0b141e; border:1px solid var(--line); position:relative}
   .gal .thumb img{width:100%; height:100%; object-fit:cover; display:block}
-  .gal .thumb a{display:block; width:100%; height:100%}
-  .gal .thumb.text{display:flex; align-items:center; justify-content:center; padding:6px; color:#eaf2ff; font-size:.82rem; text-align:center}
   .gal .thumb .mini-memo{position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); color:#fff; font-size:.72rem; padding:2px 6px}
+  .gal .thumb.text{display:flex; align-items:center; justify-content:center; padding:6px; color:#eaf2ff; font-size:.82rem; text-align:center}
+  .gal .thumb button{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
   .link-hint{opacity:.8}
   .mini-memo{color:#cfe2ff}
   `;
   document.head.appendChild(s);
+
+  // 위젯 미리보기 썸네일 버튼(다운로드) 위임 바인딩
+  document.addEventListener('click', async (e)=>{
+    const btn = e.target?.closest?.('.gal .thumb button.dl-btn');
+    if (!btn) return;
+    const url = btn.dataset.url;
+    await forceDownload(url, 'design-asset.jpg');
+  });
 }
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function stripTags(html){ return String(html||'').replace(/<\/?[^>]+(>|$)/g, ''); }
