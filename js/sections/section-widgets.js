@@ -82,37 +82,70 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     const randomAssets = pickRandom(gallery, 6);
 
     const tiles = [];
-    if (enabled.includes('summary')) tiles.push(tile('교육 내용 전반 요약', `
-      <div class="wg-summary-preview">${(summary?.widgetNoteHtml || esc(summary?.widgetNote || '교육 개요 요약을 입력하세요.'))}</div>
-    `,'openSummary'));
 
-    if (enabled.includes('budget')) tiles.push(tile('예산안 평균', `
-      <div class="mini-table">
-        <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
-        ${(budgetAverages.items || []).slice(0,4).map(it=>`
-          <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
-        ).join('')}
-      </div>
-    `,'openBudget'));
+    // 요약 카드: widgetNoteHtml(신규, HTML) 우선, 없으면 widgetNote(텍스트)를 escape하여 사용
+    const summaryHTML = (summary && summary.widgetNoteHtml)
+      ? summary.widgetNoteHtml
+      : esc(summary?.widgetNote ?? '교육 개요 요약을 입력하세요.');
 
-    if (enabled.includes('outcome')) tiles.push(tile('교육 성과 전반 요약', `
-      <div class="mini-table">
-        <div class="row"><div>응답 수 평균</div><div>${Math.round(outcomeAverages.nAvg || 0)} 명</div></div>
-        <div class="row"><div>CSAT 평균</div><div>${(outcomeAverages.csatAvg ?? 0).toFixed(1)}</div></div>
-        <div class="row"><div>NPS 평균</div><div>${Math.round(outcomeAverages.npsAvg ?? 0)}</div></div>
-      </div>
-    `,'openOutcome'));
+    if (enabled.includes('summary')) {
+      tiles.push(tile(
+        '교육 내용 전반 요약',
+        `<div class="wg-summary-preview">${summaryHTML}</div>`,
+        'openSummary'
+      ));
+    }
 
-    if (enabled.includes('design')) tiles.push(tile('포함 디자인', `
-      <div class="gal">
-        ${randomAssets.map(url => `
-          <div class="thumb">
-            <button class="dl-btn" data-url="${url}" title="다운로드">
-              <img src="${url}" alt="asset"/>
-            </button>
-          </div>`).join('') || `<div class="muted">디자인 자산이 없습니다.</div>`}
-      </div>
-    `,'openGallery'));
+    if (enabled.includes('budget')) {
+      tiles.push(tile(
+        '예산안 평균',
+        `
+        <div class="mini-table">
+          <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
+          ${(budgetAverages.items || []).slice(0,4).map(it=>`
+            <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
+          `).join('')}
+        </div>
+        `,
+        'openBudget'
+      ));
+    }
+
+    if (enabled.includes('outcome')) {
+      tiles.push(tile(
+        '교육 성과 전반 요약',
+        `
+        <div class="mini-table">
+          <div class="row"><div>응답 수 평균</div><div>${Math.round(outcomeAverages.nAvg || 0)} 명</div></div>
+          <div class="row"><div>CSAT 평균</div><div>${(outcomeAverages.csatAvg ?? 0).toFixed(1)}</div></div>
+          <div class="row"><div>NPS 평균</div><div>${Math.round(outcomeAverages.npsAvg ?? 0)}</div></div>
+        </div>
+        `,
+        'openOutcome'
+      ));
+    }
+
+    if (enabled.includes('design')) {
+      tiles.push(tile(
+        '포함 디자인',
+        `
+        <div class="gal">
+          ${
+            randomAssets.length
+              ? randomAssets.map(url => `
+                <div class="thumb">
+                  <button class="dl-btn" data-url="${url}" title="다운로드">
+                    <img src="${url}" alt="asset">
+                  </button>
+                </div>
+              `).join('')
+              : `<div class="muted">디자인 자산이 없습니다.</div>`
+          }
+        </div>
+        `,
+        'openGallery'
+      ));
+    }
 
     mount.innerHTML = `<div class="sec sec-wg"><div class="grid4">${tiles.join('')}</div></div>`;
 
@@ -153,7 +186,8 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
             <button class="rtb" data-cmd="strikeThrough">S̶</button>
             <button class="rtb" data-cmd="createLink">🔗</button>
           </div>
-          <div id="wgTxtHtml" class="rte" contenteditable="true">${safeHtml}</div>`
+          <div id="wgTxtHtml" class="rte" contenteditable="true">${safeHtml}</div>
+          `
         : `<div class="rte-view">${safeHtml || '(내용 없음)'}</div>`;
 
       const ov = openModal({
@@ -191,7 +225,9 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         <div class="mini-table" style="margin-bottom:8px">
           <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(Math.round(calcBudgetAverage(ymap).totalAvg||0))} 원</b></div></div>
         </div>
-        <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
+        <table class="x-table">
+          ${rows.map((r,i)=>`<tr>${r.map(c=> i ? `<td>${esc(c)}</td>` : `<th>${esc(c)}</th>`).join('')}</tr>`).join('')}
+        </table>
       `;
       openModal({ title:'예산안 평균(항목별)', contentHTML:content });
     });
@@ -209,21 +245,30 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
           <div class="row"><div>CSAT 평균</div><div>${(outcomeAverages.csatAvg ?? 0).toFixed(1)}</div></div>
           <div class="row"><div>NPS 평균</div><div>${Math.round(outcomeAverages.npsAvg ?? 0)}</div></div>
         </div>
-        <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
+        <table class="x-table">
+          ${rows.map((r,i)=>`<tr>${r.map(c=> i ? `<td>${esc(c)}</td>` : `<th>${esc(c)}</th>`).join('')}</tr>`).join('')}
+        </table>
       `;
       openModal({ title:'교육 성과 전반 요약 상세', contentHTML:content });
     });
 
     // 갤러리(바둑판 + 다운로드)
     mount.querySelector('[data-act="openGallery"]')?.addEventListener('click', ()=>{
-      const content = `<div class="gal gal-lg">
-        ${(gallery||[]).map(url => `
-          <div class="thumb">
-            <button class="dl-btn" data-url="${url}" title="다운로드">
-              <img src="${url}" alt="asset"/>
-            </button>
-          </div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}
-      </div>`;
+      const content = `
+        <div class="gal gal-lg">
+          ${
+            (gallery||[]).length
+              ? gallery.map(url => `
+                <div class="thumb">
+                  <button class="dl-btn" data-url="${url}" title="डाउन로드">
+                    <img src="${url}" alt="asset">
+                  </button>
+                </div>
+              `).join('')
+              : `<div class="muted">자산이 없습니다.</div>`
+          }
+        </div>
+      `;
       const ov = openModal({ title:'포함 디자인 갤러리', contentHTML:content });
       ov.querySelectorAll('.dl-btn').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
