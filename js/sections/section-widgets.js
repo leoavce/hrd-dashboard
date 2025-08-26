@@ -1,5 +1,5 @@
 // js/sections/section-widgets.js
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { openModal } from "../utils/modal.js";
 import { loadYears, fmt, pickRandom } from "../utils/helpers.js";
 
@@ -54,8 +54,8 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
     return m;
   }
 
-  /** 모든 연도의 디자인 asset을 모아 중복 제거(중복으로 2번 보이는 버그 방지) */
   function mergedAssetsFrom(ymap){
+    // 각 연도의 design.assets(type:'img') 및 레거시 assetLinks 수집 (중복 제거)
     const set = new Set();
     for (const y of years){
       const d = (ymap[y]?.design)||{};
@@ -66,11 +66,11 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         d.assetLinks.forEach(u=> set.add(u));
       }
     }
-    // 레거시 single 문서도 보조로 포함
+    // 단일문서(레거시)도 보조로 포함
     if (Array.isArray(single?.design?.assetLinks)){
       single.design.assetLinks.forEach(u=> set.add(u));
     }
-    return Array.from(set);
+    return [...set];
   }
 
   function paint(){
@@ -83,7 +83,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     const tiles = [];
     if (enabled.includes('summary')) tiles.push(tile('교육 내용 전반 요약', `
-      <div class="note-preview">${(summary?.widgetNote || '교육 개요 요약을 입력하세요.').replace(/\n/g,'<br>')}</div>
+      <div class="wg-summary-preview">${(summary?.widgetNoteHtml || esc(summary?.widgetNote || '교육 개요 요약을 입력하세요.'))}</div>
     `,'openSummary'));
 
     if (enabled.includes('budget')) tiles.push(tile('예산안 평균', `
@@ -91,7 +91,7 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
         <div class="row"><div>평균 총액</div><div>${fmt.format(Math.round(budgetAverages.totalAvg || 0))} 원</div></div>
         ${(budgetAverages.items || []).slice(0,4).map(it=>`
           <div class="row"><div>${esc(it.name)}</div><div>${fmt.format(Math.round(it.avg||0))} 원</div></div>
-        `).join('')}
+        ).join('')}
       </div>
     `,'openBudget'));
 
@@ -105,10 +105,12 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     if (enabled.includes('design')) tiles.push(tile('포함 디자인', `
       <div class="gal">
-        ${randomAssets.length
-          ? randomAssets.map(url => `<div class="thumb"><a href="${url}" download><img src="${url}" alt="asset"/></a></div>`).join('')
-          : `<div class="muted">디자인 자산이 없습니다.</div>`
-        }
+        ${randomAssets.map(url => `
+          <div class="thumb">
+            <button class="dl-btn" data-url="${url}" title="다운로드">
+              <img src="${url}" alt="asset"/>
+            </button>
+          </div>`).join('') || `<div class="muted">디자인 자산이 없습니다.</div>`}
       </div>
     `,'openGallery'));
 
@@ -116,88 +118,85 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
 
     // 상세 모달들
     bindModals(ymap, gallery, budgetAverages, outcomeAverages, years);
+
+    // 위젯 썸네일 다운로드(위임)
+    mount.querySelectorAll('.dl-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const url = btn.dataset.url;
+        await forceDownload(url, 'design-asset.jpg');
+      });
+    });
   }
 
   function bindModals(ymap, gallery, budgetAverages, outcomeAverages, years){
-    // ===== 요약(노션풍 에디터) =====
-    mount.querySelector('[data-act="openSummary"]')?.addEventListener('click', ()=>{
-      const content = `
-        <div class="editor-bar ${EDIT?'':'hidden'}">
-          <button data-cmd="bold"><b>B</b></button>
-          <button data-cmd="italic"><i>I</i></button>
-          <button data-block="h2">H2</button>
-          <button data-block="blockquote">❝</button>
-          <button data-list="insertUnorderedList">•</button>
-          <button data-list="insertOrderedList">1.</button>
-          <button data-cmd="removeFormat">지우기</button>
-        </div>
-        <div id="wgTxt" class="rich-area" contenteditable="${EDIT?'true':'false'}">${summary?.widgetNote ? summary.widgetNote : ''}</div>
-      `;
+    // 요약 (편집 저장 가능)
+    mount.querySelector('[data-act="openSummary"]')?.addEventListener('click', async ()=>{
+      // 최신 summary 문서 다시 로드(동시 편집 대비)
+      const sSnap = await getDoc(doc(db,'programs',programId,'meta','summary'));
+      const sVal  = sSnap.exists()? sSnap.data(): {};
+      const isEdit = EDIT;
+      const safeHtml = sVal?.widgetNoteHtml || esc(sVal?.widgetNote || '');
+
+      const content = isEdit
+        ? `
+          <div class="rte-toolbar">
+            <button class="rtb" data-cmd="bold"><b>B</b></button>
+            <button class="rtb" data-cmd="italic"><i>I</i></button>
+            <span class="sep"></span>
+            <button class="rtb" data-block="H1">H1</button>
+            <button class="rtb" data-block="H2">H2</button>
+            <span class="sep"></span>
+            <button class="rtb" data-cmd="insertUnorderedList">• List</button>
+            <button class="rtb" data-cmd="insertOrderedList">1. List</button>
+            <button class="rtb" data-block="QUOTE">❝</button>
+            <span class="sep"></span>
+            <button class="rtb" data-cmd="strikeThrough">S̶</button>
+            <button class="rtb" data-cmd="createLink">🔗</button>
+          </div>
+          <div id="wgTxtHtml" class="rte" contenteditable="true">${safeHtml}</div>`
+        : `<div class="rte-view">${safeHtml || '(내용 없음)'}</div>`;
+
       const ov = openModal({
         title:'교육 내용 전반 요약',
-        contentHTML:content,
-        footerHTML: EDIT ? `<button class="om-btn primary" id="wgSave">저장</button>` : ''
+        contentHTML: content,
+        footerHTML: isEdit ? `<button class="om-btn primary" id="wgSave">저장</button>` : ''
       });
 
-      // 툴바
-      if (EDIT){
-        ov.querySelectorAll('.editor-bar [data-cmd]').forEach(btn=>{
-          btn.addEventListener('click', ()=> document.execCommand(btn.dataset.cmd,false,null));
-        });
-        ov.querySelectorAll('.editor-bar [data-block]').forEach(btn=>{
-          btn.addEventListener('click', ()=> document.execCommand('formatBlock',false,btn.dataset.block));
-        });
-        ov.querySelectorAll('.editor-bar [data-list]').forEach(btn=>{
-          btn.addEventListener('click', ()=> document.execCommand(btn.dataset.list,false,null));
+      if (isEdit){
+        initToolbar(ov, '#wgTxtHtml');
+        ov.querySelector('#wgSave')?.addEventListener('click', async ()=>{
+          const valHtml = ov.querySelector('#wgTxtHtml').innerHTML.trim();
+          await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNoteHtml: valHtml, updatedAt: Date.now() }, { merge:true });
+          alert('저장되었습니다.'); ov.remove();
+          // UI 갱신
+          const sSnap2 = await getDoc(doc(db,'programs',programId,'meta','summary'));
+          summary = sSnap2.exists()? sSnap2.data(): {};
+          paint();
         });
       }
-      // 저장
-      ov.querySelector('#wgSave')?.addEventListener('click', async ()=>{
-        const html = ov.querySelector('#wgTxt').innerHTML;
-        await setDoc(doc(db,'programs',programId,'meta','summary'), { widgetNote: html, updatedAt: Date.now() }, { merge:true });
-        alert('저장되었습니다.'); ov.remove();
-      });
     });
 
-    // ===== 예산 평균 상세(동일 항목 평균 + 기타) =====
+    // 예산 평균 상세(동일 항목 평균, 없다면 '기타')
     mount.querySelector('[data-act="openBudget"]')?.addEventListener('click', ()=>{
-      // 항목별 값 배열
-      const itemsMap = {};
-      years.forEach(y=>{
-        (ymap[y]?.budget?.items || []).forEach(it=>{
-          const name = (it?.name||'').trim();
-          const val = Number(it?.subtotal||((+it.unitCost||0)*(+it.qty||0))||0);
-          if (!name || !val) return;
-          (itemsMap[name] ||= []).push(val);
-        });
-      });
-      const rows = [];
-      let etcSum=0, etcCnt=0;
-      Object.keys(itemsMap).forEach(name=>{
-        const arr = itemsMap[name];
-        if (arr.length > 1){
-          const avg = arr.reduce((s,v)=>s+v,0)/arr.length;
-          rows.push([name, Math.round(avg)]);
-        }else{
-          etcSum += arr[0]; etcCnt += 1;
-        }
-      });
-      if (etcCnt>0) rows.push(['기타', Math.round(etcSum/etcCnt)]);
-      rows.sort((a,b)=> b[1]-a[1]);
+      const itemsAvg = (calcBudgetAverage(ymap).items||[]);
+      const rows = [['항목','평균금액(원)']];
+
+      if (!itemsAvg.length){
+        rows.push(['기타','0']);
+      }else{
+        itemsAvg.forEach(it=> rows.push([it.name||'기타', fmt.format(Math.round(it.avg||0))]));
+      }
 
       const content = `
         <div class="mini-table" style="margin-bottom:8px">
-          <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(Math.round(budgetAverages.totalAvg||0))} 원</b></div></div>
+          <div class="row"><div><b>평균 총액</b></div><div><b>${fmt.format(Math.round(calcBudgetAverage(ymap).totalAvg||0))} 원</b></div></div>
         </div>
-        <table class="x-table">
-          <tr><th>항목</th><th>평균 금액(원)</th></tr>
-          ${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${fmt.format(r[1])}</td></tr>`).join('') || `<tr><td colspan="2">데이터 없음</td></tr>`}
-        </table>
+        <table class="x-table">${rows.map((r,i)=>`<tr>${r.map(c=> i? `<td>${esc(c)}</td>`:`<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</table>
       `;
-      openModal({ title:'예산안 평균 상세', contentHTML:content });
+      openModal({ title:'예산안 평균(항목별)', contentHTML:content });
     });
 
-    // ===== 성과 평균 상세 =====
+    // 성과 평균 상세
     mount.querySelector('[data-act="openOutcome"]')?.addEventListener('click', ()=>{
       const rows = [['연도','응답수','CSAT','NPS']];
       for (const y of years) {
@@ -215,13 +214,23 @@ export async function renderWidgetSection({ db, storage, programId, mount, summa
       openModal({ title:'교육 성과 전반 요약 상세', contentHTML:content });
     });
 
-    // ===== 갤러리(중복 제거 + 이미지 클릭 시 다운로드) =====
+    // 갤러리(바둑판 + 다운로드)
     mount.querySelector('[data-act="openGallery"]')?.addEventListener('click', ()=>{
-      const list = Array.from(new Set(gallery||[]));
       const content = `<div class="gal gal-lg">
-        ${list.length ? list.map(url => `<div class="thumb"><a href="${url}" download><img src="${url}" alt="asset"/></a></div>`).join('') : `<div class="muted">자산이 없습니다.</div>`}
+        ${(gallery||[]).map(url => `
+          <div class="thumb">
+            <button class="dl-btn" data-url="${url}" title="다운로드">
+              <img src="${url}" alt="asset"/>
+            </button>
+          </div>`).join('') || `<div class="muted">자산이 없습니다.</div>`}
       </div>`;
-      openModal({ title:'포함 디자인 갤러리', contentHTML:content });
+      const ov = openModal({ title:'포함 디자인 갤러리', contentHTML:content });
+      ov.querySelectorAll('.dl-btn').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const url = btn.dataset.url;
+          await forceDownload(url, 'design-asset.jpg');
+        });
+      });
     });
   }
 
@@ -251,13 +260,11 @@ function calcBudgetAverage(ymap){
   let totals=[], itemsMap={};
   for(const y in ymap){
     const items = ymap[y]?.budget?.items||[];
-    const total = items.reduce((s,it)=> s + ((Number(it.subtotal)||((+it.unitCost||0)*(+it.qty||0)))||0), 0);
+    const total = items.reduce((s,it)=> s + (Number(it.subtotal)||0), 0);
     if (total) totals.push(total);
     items.forEach(it=>{
-      const k = (it.name||'항목').trim();
-      const v = (Number(it.subtotal)||((+it.unitCost||0)*(+it.qty||0)))||0;
-      if(!v) return;
-      (itemsMap[k] ||= []).push(v);
+      const k = (it.name||'').trim() || '기타';
+      (itemsMap[k] ||= []).push(Number(it.subtotal)||0);
     });
   }
   const itemsAvg = Object.keys(itemsMap).map(name=>{
@@ -285,23 +292,78 @@ function ensureStyle(){
   const s = document.createElement('style'); s.id='wg-style';
   s.textContent = `
   .sec-hd h3{margin:0 0 8px;color:#d6e6ff;font-weight:800}
-  .wg-card{display:flex;flex-direction:column;min-height:220px}
-  .wg-bd{flex:1}
-  .note-preview{white-space:pre-wrap; line-height:1.5}
-  /* 간단 리치 에디터 */
-  .editor-bar{display:flex;gap:6px;margin:0 0 8px}
-  .editor-bar button{background:#0f1b22;border:1px solid var(--line);color:#eaf2ff;border-radius:8px;padding:4px 8px;cursor:pointer}
-  .rich-area{min-height:260px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#0b141e;color:#eaf2ff;line-height:1.55}
-  .rich-area:focus{outline:2px solid #294a7a}
-  /* 갤러리 */
-  .gal{display:flex; gap:8px; flex-wrap:wrap}
+
+  .sec-wg .grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  .wg-card{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; padding:12px;
+            min-height:220px; max-height:220px; display:flex; flex-direction:column; overflow:hidden; }
+  .wg-hd{ font-weight:800; color:#d6e6ff; margin-bottom:8px; flex:0 0 auto; }
+  .wg-bd{ flex:1 1 auto; overflow:hidden }
+  .wg-ft{ flex:0 0 auto; margin-top:8px }
+
+  .mini-table .row{display:flex; justify-content:space-between; gap:12px}
+  .wg-summary-preview{ max-height:150px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; word-break:break-word; }
+
+  /* 위젯 갤러리(바둑판) */
+  .gal{display:grid; grid-template-columns:repeat(3, 90px); gap:8px}
   .gal .thumb{width:90px; height:70px; border-radius:8px; overflow:hidden; background:#0b141e; border:1px solid var(--line); position:relative}
   .gal .thumb img{width:100%; height:100%; object-fit:cover; display:block}
-  .gal-lg{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .gal-lg .thumb{width:100%;height:0;padding-top:66%;position:relative}
-  .gal-lg .thumb img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
+  .gal .thumb button{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
+
+  .gal.gal-lg{ grid-template-columns:repeat(4, 160px); }
+  .gal.gal-lg .thumb{ width:160px; height:120px; }
+
+  /* RTE */
+  .rte-toolbar{display:flex; gap:6px; align-items:center; margin-bottom:8px}
+  .rte-toolbar .rtb{padding:6px 8px; border:1px solid var(--line); background:#0c1522; color:#eaf2ff; border-radius:8px; cursor:pointer}
+  .rte-toolbar .sep{width:8px; height:1px; background:#2a3a45; display:inline-block}
+  .rte, .rte-view{min-height:200px; padding:12px; border:1px solid var(--line); background:#0f1b22; border-radius:8px; max-height:62vh; overflow:auto}
+  .rte:focus{outline:2px solid #3e68ff}
   `;
   document.head.appendChild(s);
+}
+
+/* 공용: RTE 툴바 */
+function initToolbar(root, selector){
+  const ed = root.querySelector(selector);
+  const exec = (cmd, val=null)=> document.execCommand(cmd,false,val);
+  root.querySelectorAll('.rte-toolbar .rtb[data-cmd]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (b.dataset.cmd==='createLink'){
+        const url = prompt('링크 URL'); if (url) exec('createLink', url);
+      } else {
+        exec(b.dataset.cmd);
+      }
+      ed?.focus();
+    });
+  });
+  root.querySelectorAll('.rte-toolbar .rtb[data-block]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const t=b.dataset.block;
+      if (t==='H1') exec('formatBlock','H1');
+      else if (t==='H2') exec('formatBlock','H2');
+      else if (t==='QUOTE') exec('formatBlock','BLOCKQUOTE');
+      ed?.focus();
+    });
+  });
+}
+
+/* 공용: 강제 다운로드 */
+async function forceDownload(url, filename='download'){
+  try{
+    const r = await fetch(url, { credentials:'omit' });
+    if(!r.ok) throw new Error('fetch failed');
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }catch(e){
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.target='_blank'; a.rel='noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
 }
 
 const esc = (s)=> String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
