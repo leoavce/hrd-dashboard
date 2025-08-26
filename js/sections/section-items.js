@@ -42,7 +42,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
 
   function initCarousel(kind, renderer){
     const host = mount.querySelector(`[data-kind="${kind}"] .cards`);
-    const yBox = mount.querySelector(`[data-kind="${kind}"] .years`);
+    const yBox  = mount.querySelector(`[data-kind="${kind}"] .years`);
     let index = 0;
     const clamp = v => Math.max(0, Math.min(years.length-3, v));
     const slice = ()=> {
@@ -120,7 +120,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const v = snap.exists()? snap.data(): {};
 
     if (kind==='content'){
-      // 리치 텍스트(간단 RTE): contenteditable로 HTML 저장, 카드 프리뷰는 텍스트만 추출
+      // 간단 RTE(contenteditable)로 HTML 저장, 카드 프리뷰는 텍스트 스니펫
       const html = EDIT
         ? `<div id="cHtml" class="rte" contenteditable="true">${v?.content?.outlineHtml || esc(v?.content?.outline||'')}</div>
            <div style="margin-top:10px"><button class="om-btn primary" id="save">저장</button></div>`
@@ -206,9 +206,9 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
         if (EDIT){
           // 이름/비고는 바로 값만 반영, 재페인트 없음
-          tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{
-            inp.addEventListener('input', ()=>{
-              const i = +inp.dataset.i, k = inp.dataset.k;
+          tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{ 
+            inp.addEventListener('input', ()=>{ 
+              const i = +inp.dataset.i, k = inp.dataset.k; 
               items[i][k] = inp.value;
             });
           });
@@ -326,7 +326,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
             addr:  mv.querySelector('#vAddr').value.trim(),
           };
           mv.remove();
-          // 재페인트(업체칩 렌더 필요)
+          // 재페인트(업체 칩 갱신)
           paint();
           window.dispatchEvent(new CustomEvent('hrd:year-updated', { detail:{ programId, year:y } }));
         });
@@ -819,6 +819,7 @@ function ensureStyle(){
   .vendor-tip{position:fixed;z-index:9999;max-width:280px;background:#0f1b2b;border:1px solid #2a3a45;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);color:#eaf2ff}
   .vendor-tip .v-row{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+  /* 카드 깨짐 방지 + 스니펫 한줄 */
   .txt-snippet{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 
   /* 리치텍스트 간단 스타일 */
