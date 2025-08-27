@@ -10,6 +10,8 @@ import { openModal } from "./utils/modal.js";
  * { id, title, from, to, checklist:[{id,text,done}] }
  */
 export async function initHomeDashboard(db){
+  ensureStyle();
+
   const host = document.getElementById("homeDashboard");
   if(!host) return;
 
@@ -33,10 +35,10 @@ export async function initHomeDashboard(db){
   }
 
   host.innerHTML = `
-    <div class="panel">
-      <div class="panel-hd">
-        <h4>진행/준비중인 교육</h4>
-        <div class="row">
+    <div class="panel od-panel">
+      <div class="panel-hd od-hd">
+        <h4 class="od-title">진행/준비중인 교육</h4>
+        <div class="panel-actions">
           <button class="btn small ghost" id="odEdit">편집</button>
           <button class="btn small" id="odAdd" style="display:none">추가</button>
         </div>
@@ -128,6 +130,7 @@ async function openDetailModal(db, data, { editable }){
           <label>교육명</label>
           <input id="odTitle" value="${esc(data.title||"")}" ${editable ? "" : "readonly"}>
         </div>
+
         <div class="od-row two">
           <div>
             <label>시작일</label>
@@ -140,7 +143,11 @@ async function openDetailModal(db, data, { editable }){
         </div>
 
         <div class="od-row">
-          <div class="od-subhd">체크리스트</div>
+          <div class="od-subhd">
+            체크리스트
+            ${editable ? `<span class="od-subhint">항목 더블클릭 또는 연필 아이콘으로 편집</span>` : ``}
+          </div>
+
           <div id="ckBox" class="ck-list">
             ${ckHTML || '<div class="muted">항목이 없습니다.</div>'}
           </div>
@@ -175,12 +182,42 @@ async function openDetailModal(db, data, { editable }){
       await upsert(db, data.programId, latest, "update"); // 영속화
     });
 
-    // 텍스트 편집/삭제/추가는 편집 모드에서만
+    // 편집 모드: 삭제/추가/텍스트편집
     if (editable){
+      // 삭제
       ckBox.addEventListener("click", (e)=>{
         const row = e.target.closest(".ck-row"); if(!row) return;
         if (e.target.closest(".ck-del")){ row.remove(); return; }
+        if (e.target.closest(".ck-edit")){
+          const textEl = row.querySelector(".ck-text");
+          textEl.setAttribute("contenteditable","true");
+          textEl.focus();
+          // 커서 맨뒤
+          const range = document.createRange(); const sel = window.getSelection();
+          range.selectNodeContents(textEl); range.collapse(false); sel.removeAllRanges(); sel.addRange(range);
+        }
       });
+      // 더블클릭으로도 편집
+      ckBox.addEventListener("dblclick", (e)=>{
+        const row = e.target.closest(".ck-row"); if(!row) return;
+        const textEl = row.querySelector(".ck-text");
+        textEl.setAttribute("contenteditable","true");
+        textEl.focus();
+      });
+      // 엔터 시 편집 종료
+      ckBox.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter" && e.target.classList.contains("ck-text")){
+          e.preventDefault();
+          e.target.blur();
+        }
+      });
+      ckBox.addEventListener("blur", (e)=>{
+        if (e.target.classList.contains("ck-text")){
+          e.target.removeAttribute("contenteditable");
+        }
+      }, true);
+
+      // 항목 추가
       ov.querySelector("#ckAddBtn")?.addEventListener("click", ()=>{
         const input = ov.querySelector("#ckNew");
         const text = (input.value||"").trim();
@@ -192,6 +229,7 @@ async function openDetailModal(db, data, { editable }){
         );
       });
     }else{
+      // 읽기 모드에선 contenteditable 금지
       ckBox.querySelectorAll(".ck-text").forEach(el=> el.setAttribute("contenteditable","false"));
     }
 
@@ -209,11 +247,16 @@ async function openDetailModal(db, data, { editable }){
 }
 
 function lineHTML(ck, editable){
+  // label을 사용해 체크박스/텍스트 정렬 + 접근성
   return `
     <label class="ck-row ${ck.done ? 'done' : ''}" data-id="${ck.id}">
       <input type="checkbox" class="ck-check" ${ck.done ? 'checked' : ''} />
-      <span class="ck-text" ${editable ? 'contenteditable="true"' : ''}>${esc(ck.text||"")}</span>
-      ${editable ? `<button class="ck-del" title="삭제">🗑</button>` : ``}
+      <span class="ck-text" ${editable ? '' : 'contenteditable="false"'}>${esc(ck.text||"")}</span>
+      ${editable ? `
+        <div class="ck-actions">
+          <button type="button" class="ck-edit" title="편집">✎</button>
+          <button type="button" class="ck-del"  title="삭제">🗑</button>
+        </div>` : ``}
     </label>
   `;
 }
@@ -281,4 +324,65 @@ async function pickProgram(programs){
       document.head.appendChild(s);
     }
   });
+}
+
+/* ---------- 스타일 주입 ---------- */
+function ensureStyle(){
+  if (document.getElementById("od-style")) return;
+  const s = document.createElement("style"); s.id = "od-style";
+  s.textContent = `
+  /* 헤더: 우측 상단 정렬 */
+  .od-panel .od-hd{
+    display:flex; align-items:center; justify-content:space-between;
+    gap: 12px; margin-bottom: 8px;
+  }
+  .od-panel .od-title{ margin:0; }
+  .od-panel .panel-actions{ display:flex; align-items:center; gap:8px; margin-left:auto; }
+
+  /* 칩 기본(기존 디자인 유지 가정) */
+  .od-panel .chips .chip{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+    background:#0f1b22; color:#eaf2ff; gap:12px;
+  }
+  .od-panel .chips .chip .l{ display:flex; align-items:center; gap:8px; min-width:0 }
+  .od-panel .chips .chip .title{ font-weight:700; }
+  .od-panel .chips .chip .period{ color:#9fb4c8; font-size:.9rem; }
+  .od-panel .chips .chip .chip-del{ background:none; border:0; cursor:pointer; color:#ff8b8b; font-size:1rem; }
+
+  /* 상세 모달 폼 */
+  .od-detail .od-row{ margin:10px 0; }
+  .od-detail .od-row.two{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .od-detail label{ display:block; color:#bcd3f0; font-size:.92rem; margin-bottom:4px; }
+  .od-detail input[type="text"], .od-detail input[type="date"], .od-detail input:not([type]){
+    width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#0f1b22; color:#eaf2ff;
+  }
+  .od-subhd{ font-weight:700; color:#eaf2ff; display:flex; align-items:center; gap:8px; }
+  .od-subhd .od-subhint{ color:#94abc7; font-weight:400; font-size:.85rem; }
+
+  /* 체크리스트 */
+  .ck-list{ display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .ck-row{
+    display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px;
+    padding:10px 12px; border:1px solid var(--line); background:#0c1522; border-radius:10px;
+  }
+  .ck-row:hover{ background:#0f1b2b; }
+  .ck-row input.ck-check{ width:18px; height:18px; }
+  .ck-row .ck-text{
+    min-height:18px; line-height:1.4; outline:none; word-break:break-word;
+    color:#eaf2ff;
+  }
+  .ck-row.done .ck-text{ color:#9fb4c8; text-decoration:line-through; }
+  .ck-actions{ display:flex; gap:6px; }
+  .ck-actions .ck-edit, .ck-actions .ck-del{
+    background:#0f1b22; border:1px solid var(--line); color:#eaf2ff;
+    border-radius:8px; padding:4px 6px; cursor:pointer;
+  }
+  .ck-actions .ck-del{ color:#ff9090; }
+  .ck-actions .ck-edit:hover, .ck-actions .ck-del:hover{ background:#132235; }
+
+  .ck-add{ display:flex; gap:8px; margin-top:10px; }
+  .ck-add input{ flex:1; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#0f1b22; color:#eaf2ff; }
+  `;
+  document.head.appendChild(s);
 }
