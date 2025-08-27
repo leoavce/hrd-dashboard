@@ -90,9 +90,8 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
   window[NS] = onYearUpdated;
   window.addEventListener('hrd:year-updated', onYearUpdated);
 
-  /* ---------- 딥링크 상세 열기(검색/해시에서 detail=1로 진입 시) ---------- */
+  /* ---------- 딥링크 상세 열기 ---------- */
   const mapSectionId = (sec)=>{
-    // items:content → content 등으로 맵핑
     const m = {
       'items:content':'content',
       'items:budget':'budget',
@@ -107,7 +106,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const { section, year } = e.detail || {};
     const kind = mapSectionId(section);
     if (!['content','budget','outcome','design'].includes(kind)) return;
-    // year 없으면 첫 번째 연도로 폴백
     const y = year || (years && years[0]);
     if (y) openDetail(kind, y);
   };
@@ -228,12 +226,12 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       const paint=()=>{
         tbody.innerHTML = items.map((it,i)=> rowHTML(it,i)).join('');
         if (EDIT){
-          // 이름/비고는 바로 반영
+          // 이름/비고는 즉시 반영
           tbody.querySelectorAll('input[data-i][data-k="name"], input[data-i][data-k="note"]').forEach(inp=>{
             inp.addEventListener('input', ()=>{ const i=+inp.dataset.i, k=inp.dataset.k; items[i][k] = inp.value; });
           });
 
-          // 숫자 입력은 재페인트 없이 셀/합계만 갱신
+          // 숫자 입력은 재페인트 없이 갱신
           const sanitize = (s)=> String(s||'').replace(/[^\d.]/g,'');
           const updateRow = (i)=>{
             const row = tbody.querySelector(`tr[data-i="${i}"]`);
@@ -514,7 +512,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       };
 
       const paint = ()=>{
-        // 텍스트 먼저 나오도록 정렬
         const view = assets.slice().sort(a=> a.type==='text' ? -1 : 1);
         gal.innerHTML = view.length
           ? view.map(card).join('')
@@ -616,10 +613,11 @@ function block(title, kind){
   `;
 }
 function renderContentCard(y, v){
-  // 불릿 강제 제거 → 텍스트 스니펫을 간결히(카드 터짐 방지)
+  // 불릿 제거 + 엔티티 정규화 → 3줄 미리보기 (카드 터짐 방지)
   const html = v?.content?.outlineHtml || '';
   const plain = html ? stripTags(html) : (v?.content?.outline||'');
-  const lines = plain.split('\n').map(s=>s.trim()).filter(Boolean);
+  const normalized = plain.replace(/&nbsp;/g, ' ');
+  const lines = normalized.split('\n').map(s=>s.trim()).filter(Boolean);
   const snippet = lines.slice(0,3).join(' ');
   return `
     <div class="cap">${y}</div>
@@ -673,9 +671,6 @@ function renderDesignCard(y, v){
     <div class="gal">${cells || '<div class="muted">자산 없음</div>'}</div>
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
-
-  // 다운로드 바인딩은 섹션 렌더 시점에 불가 → 이벤트 위임을 위해 래퍼 사용 필요
-  // 여기서는 마크업만 반환한다. 클릭 핸들링은 ensureStyle() 내부에서 전역 위임 처리.
   return html;
 }
 
@@ -727,7 +722,7 @@ function parseCSV(text){
     for (let i=0;i<line.length;i++){
       const ch = line[i];
       if (ch === '"' ){
-        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        if (inQ && line[i+1]===""){ cur+='"'; i++; }
         else { inQ=!inQ; }
       } else if (ch === ',' && !inQ){
         cells.push(cur); cur='';
