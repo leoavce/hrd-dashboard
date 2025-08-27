@@ -512,6 +512,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       };
 
       const paint = ()=>{
+        // 텍스트 먼저 나오도록 정렬
         const view = assets.slice().sort(a=> a.type==='text' ? -1 : 1);
         gal.innerHTML = view.length
           ? view.map(card).join('')
@@ -722,7 +723,7 @@ function parseCSV(text){
     for (let i=0;i<line.length;i++){
       const ch = line[i];
       if (ch === '"' ){
-        if (inQ && line[i+1]===""){ cur+='"'; i++; }
+        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }   // ← 따옴표 이스케이프 처리 수정
         else { inQ=!inQ; }
       } else if (ch === ',' && !inQ){
         cells.push(cur); cur='';
@@ -887,12 +888,43 @@ function ensureStyle(){
 
   /* 카드 그리드 & 고정 높이(터짐 방지) */
   .it-sec .cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-  .it-card{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; padding:12px;
-            min-height:190px; max-height:190px; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
+  .it-card{
+    background:#0f1b22; border:1px solid var(--line); border-radius:12px; padding:12px;
+    min-height:190px; max-height:190px; display:flex; flex-direction:column; gap:10px; overflow:hidden;
+  }
   .it-card .cap{ font-weight:700; color:#eaf2ff; flex:0 0 auto; }
-  .it-card .ft{ flex:0 0 auto; }
-  .txt-snippet{white-space:normal; word-break:break-word; overflow:hidden;
-    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; line-height:1.4; }
+  .it-card .ft{ flex:0 0 auto; margin-top:auto; }   /* 푸터를 항상 카드 하단으로 */
+
+  /* 본문 영역: 넘치면 미리보기로만 노출(성과 포함) */
+  .it-card > .mini-table,
+  .it-card > .bul,
+  .it-card > .txt-snippet,
+  .it-card > .gal{
+    flex:1 1 auto;
+    min-height:0;
+    overflow:hidden;
+  }
+
+  /* outcome 카드 안정화 */
+  .it-card .mini-table{ overflow:hidden; }
+  .it-card .mini-table .row{
+    display:flex; justify-content:space-between; gap:12px;
+    white-space:nowrap; overflow:hidden;
+  }
+  .it-card .mini-table .row > div{
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  .it-card .bul{
+    margin-top:6px; padding-left:18px;
+    overflow:hidden; display:-webkit-box;
+    -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.35;
+  }
+
+  /* 콘텐츠 카드 텍스트 미리보기 */
+  .txt-snippet{
+    white-space:normal; word-break:break-word; overflow:hidden;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; line-height:1.4;
+  }
 
   .importer .linklike{background:none;border:0;color:#8fb7ff;cursor:pointer;text-decoration:underline}
   .v-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;background:#132235;color:#dbebff;font-size:.86rem}
@@ -909,9 +941,9 @@ function ensureStyle(){
 
   /* 디자인 갤러리(상세) */
   .gal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
-  .gcard{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+  .gcard{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; gap:0; }
   .gimg{width:100%; aspect-ratio: 4/3; overflow:hidden; background:#0b141e; border-bottom:1px solid var(--line);}
-  .gimg img{width:100%; height:100%; object-fit:cover; display:block;}
+  .gimg img{width:100%; height:100%; object-fit:contain; display:block;} /* 이미지가 박스에 '깔끔히' 들어가도록 contain */
   .gimg .dl-btn{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
   .gtext{padding:14px 12px;}
   .gtext-main{font-weight:700; color:#eaf2ff; word-break:break-word;}
@@ -920,8 +952,8 @@ function ensureStyle(){
   .ginp{flex:1; min-width:0}
   .gal-actions{margin-bottom:10px}
 
-  /* 카드(요약) 갤러리 스타일 보정 : 바둑판 */
-  .gal{display:grid; grid-template-columns:repeat(3, 90px); gap:8px; align-items:start}
+  /* 카드(요약) 갤러리 스타일 보정 : 포함 디자인 5열 */
+  .gal{display:grid; grid-template-columns:repeat(5, 90px); gap:8px; align-items:start}
   .gal .thumb{width:90px; height:70px; border-radius:8px; overflow:hidden; background:#0b141e; border:1px solid var(--line); position:relative}
   .gal .thumb img{width:100%; height:100%; object-fit:cover; display:block}
   .gal .thumb .mini-memo{position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); color:#fff; font-size:.72rem; padding:2px 6px}
