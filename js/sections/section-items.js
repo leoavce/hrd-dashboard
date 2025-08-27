@@ -512,7 +512,6 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       };
 
       const paint = ()=>{
-        // 텍스트 먼저 나오도록 정렬
         const view = assets.slice().sort(a=> a.type==='text' ? -1 : 1);
         gal.innerHTML = view.length
           ? view.map(card).join('')
@@ -626,33 +625,46 @@ function renderContentCard(y, v){
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
+
+/* ▶ 미리보기: 예산은 '합계만' 크게 노출 */
 function renderBudgetCard(y, v){
-  const items=(v?.budget?.items||[]).slice(0,3);
   const total = (v?.budget?.items||[]).reduce((s,it)=>s+(Number(it.subtotal)||0),0);
-  const vendorBadge = (ven)=> ven?.name ? `<span class="mini-badge" title="${[ven.email,ven.site].filter(Boolean).join(' | ')}">${esc(ven.name)}</span>` : '';
+  const count = (v?.budget?.items||[]).length;
   return `
     <div class="cap">${y}</div>
-    <div class="mini-table">
-      ${items.map(it=>`<div class="row"><div>${esc(it.name||'항목')} ${vendorBadge(it.vendor)}</div><div>${fmt.format(Number(it.subtotal||0))} 원</div></div>`).join('') || '<div class="muted">항목 없음</div>'}
-      <div class="row"><div><strong>합계</strong></div><div><strong>${fmt.format(total)} 원</strong></div></div>
+    <div class="kpi-total">
+      <div class="t">합계</div>
+      <div class="v">${fmt.format(total)}<span class="unit"> 원</span></div>
+      <div class="sub">${count}개 항목</div>
     </div>
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
+
+/* ▶ 미리보기: 성과는 요약 바 + KPI 칩(최대 3개) */
 function renderOutcomeCard(y, v){
-  const s=v?.outcome?.surveySummary||{};
-  const kpis=(v?.outcome?.kpis||[]).slice(0,2);
+  const s = v?.outcome?.surveySummary || {};
+  const kpis = (v?.outcome?.kpis || []).slice(0,3);
+  const csat = (s.csat ?? '-');
+  const nps  = (s.nps  ?? '-');
+  const n    = (s.n || 0);
+  const pills = kpis.length
+    ? `<div class="kpi-pills">${kpis.map(k=>`<span class="pill" title="${esc(k.target?`목표 ${k.target}`:'')}">${esc(k.name||'KPI')} : ${esc(k.value||'-')}</span>`).join('')}</div>`
+    : `<div class="muted small">등록된 KPI 없음</div>`;
   return `
     <div class="cap">${y}</div>
-    <div class="mini-table">
-      <div class="row"><div>응답수</div><div>${s.n||0}</div></div>
-      <div class="row"><div>CSAT</div><div>${s.csat??'-'}</div></div>
-      <div class="row"><div>NPS</div><div>${s.nps??'-'}</div></div>
+    <div class="outcome-summary">
+      <span class="m">응답수 <b>${n}</b></span>
+      <span class="d">|</span>
+      <span class="m">CSAT <b>${csat}</b></span>
+      <span class="d">|</span>
+      <span class="m">NPS <b>${nps}</b></span>
     </div>
-    <ul class="bul" style="margin-top:6px">${kpis.map(k=>`<li>${esc(k.name||'')}: ${esc(k.value||'')}</li>`).join('')}</ul>
+    ${pills}
     <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
   `;
 }
+
 function renderDesignCard(y, v){
   const norm = Array.isArray(v?.design?.assets)
     ? v.design.assets
@@ -723,7 +735,7 @@ function parseCSV(text){
     for (let i=0;i<line.length;i++){
       const ch = line[i];
       if (ch === '"' ){
-        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }   // ← 따옴표 이스케이프 처리 수정
+        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
         else { inQ=!inQ; }
       } else if (ch === ',' && !inQ){
         cells.push(cur); cur='';
@@ -893,31 +905,39 @@ function ensureStyle(){
     min-height:190px; max-height:190px; display:flex; flex-direction:column; gap:10px; overflow:hidden;
   }
   .it-card .cap{ font-weight:700; color:#eaf2ff; flex:0 0 auto; }
-  .it-card .ft{ flex:0 0 auto; margin-top:auto; }   /* 푸터를 항상 카드 하단으로 */
+  .it-card .ft{ flex:0 0 auto; margin-top:auto; }
 
-  /* 본문 영역: 넘치면 미리보기로만 노출(성과 포함) */
+  /* 본문 영역은 미리보기 전용(넘침 방지) */
   .it-card > .mini-table,
   .it-card > .bul,
   .it-card > .txt-snippet,
-  .it-card > .gal{
-    flex:1 1 auto;
-    min-height:0;
-    overflow:hidden;
+  .it-card > .gal,
+  .it-card > .kpi-total,
+  .it-card > .outcome-summary,
+  .it-card > .kpi-pills{
+    flex:1 1 auto; min-height:0; overflow:hidden;
   }
 
-  /* outcome 카드 안정화 */
-  .it-card .mini-table{ overflow:hidden; }
-  .it-card .mini-table .row{
-    display:flex; justify-content:space-between; gap:12px;
-    white-space:nowrap; overflow:hidden;
+  /* Budget 합계만 프리뷰 */
+  .kpi-total{display:flex; flex-direction:column; gap:4px; align-items:flex-start; justify-content:center}
+  .kpi-total .t{font-size:.92rem; color:#aac8ff}
+  .kpi-total .v{font-size:1.4rem; font-weight:800; color:#eaf2ff; line-height:1.2}
+  .kpi-total .v .unit{font-size:.9rem; font-weight:600; opacity:.8; margin-left:2px}
+  .kpi-total .sub{font-size:.86rem; color:#cfe2ff; opacity:.9}
+
+  /* outcome 카드 미리보기 요약바 + KPI 칩 */
+  .outcome-summary{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px dashed #223246;
+    border-radius:8px; color:#cfe2ff; white-space:nowrap; overflow:hidden;
   }
-  .it-card .mini-table .row > div{
-    overflow:hidden; text-overflow:ellipsis;
-  }
-  .it-card .bul{
-    margin-top:6px; padding-left:18px;
-    overflow:hidden; display:-webkit-box;
-    -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.35;
+  .outcome-summary .m{opacity:.95}
+  .outcome-summary .m b{color:#eaf2ff}
+  .outcome-summary .d{opacity:.5}
+  .kpi-pills{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px}
+  .kpi-pills .pill{
+    max-width:100%; display:inline-block; padding:4px 8px; border-radius:999px;
+    background:#132235; border:1px solid var(--line); color:#d6e6ff; font-size:.82rem;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
 
   /* 콘텐츠 카드 텍스트 미리보기 */
@@ -943,7 +963,7 @@ function ensureStyle(){
   .gal-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
   .gcard{ background:#0f1b22; border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; gap:0; }
   .gimg{width:100%; aspect-ratio: 4/3; overflow:hidden; background:#0b141e; border-bottom:1px solid var(--line);}
-  .gimg img{width:100%; height:100%; object-fit:contain; display:block;} /* 이미지가 박스에 '깔끔히' 들어가도록 contain */
+  .gimg img{width:100%; height:100%; object-fit:contain; display:block;}
   .gimg .dl-btn{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
   .gtext{padding:14px 12px;}
   .gtext-main{font-weight:700; color:#eaf2ff; word-break:break-word;}
