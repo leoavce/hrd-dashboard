@@ -454,8 +454,8 @@ async function renderProgramPage(programId, options = {}){
 
   // 프로그램 삭제
   btnDel.addEventListener('click', async ()=>{
-    const code = prompt('프로그램 삭제 확인 코드(ahnlabhr0315)'); if(code!=='ahnlabhr0315') return alert('코드가 일치하지 않습니다.');
-    if(!confirm('정말 삭제할까요?')) return;
+    const code = prompt('삭제 확인 코드를 입력하세요.'); if(code!=='ahnlabhr0315') return alert('코드가 일치하지 않습니다.');
+    if(!confirm('정말 삭제할까요? 삭제 내용은 복구될 수 없습니다.')) return;
     try{
       try{
         const folderRef = ref(storage, `programs/${programId}/design`);
