@@ -68,26 +68,16 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
         // ⬇︎ (신규) 예산 카드 펼치기/접기
         if (kind==='budget'){
-          el.querySelector('.expand-btn')?.addEventListener('click', ()=>{
-            if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
-            el.classList.toggle('expanded', expanded.budget.has(y));
-            // 카드만 부분 재렌더(다른 카드 영향 없음)
-            el.innerHTML = RENDERERS.budget(y, data[y] || {});
-            el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
-            el.querySelector('.expand-btn')?.addEventListener('click', ()=> {
+          const bindOnce = (node)=>{
+            node.querySelector('.expand-btn')?.addEventListener('click', ()=>{
               if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
-              el.classList.toggle('expanded', expanded.budget.has(y));
-              el.innerHTML = RENDERERS.budget(y, data[y] || {});
-              el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
-              el.querySelector('.expand-btn')?.addEventListener('click', ()=> {
-                if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
-                el.classList.toggle('expanded', expanded.budget.has(y));
-                el.innerHTML = RENDERERS.budget(y, data[y] || {});
-                el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
-                // 루프 방지용 3중 바인딩을 막기 위해 여기서 종료
-              }, { once:true });
+              node.classList.toggle('expanded', expanded.budget.has(y));
+              node.innerHTML = RENDERERS.budget(y, data[y] || {});
+              node.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+              bindOnce(node); // 재귀 바인딩(한 번씩만)
             }, { once:true });
-          });
+          };
+          bindOnce(el);
         }
       });
     };
@@ -117,18 +107,16 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
         card.innerHTML = RENDERERS[kind](y, data[y] || {});
         card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
         if (kind==='budget'){
-          card.querySelector('.expand-btn')?.addEventListener('click', ()=>{
-            if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
-            card.classList.toggle('expanded', expanded.budget.has(y));
-            card.innerHTML = RENDERERS.budget(y, data[y] || {});
-            card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
-            card.querySelector('.expand-btn')?.addEventListener('click', ()=> {
+          const bindOnce = (node)=>{
+            node.querySelector('.expand-btn')?.addEventListener('click', ()=>{
               if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
-              card.classList.toggle('expanded', expanded.budget.has(y));
-              card.innerHTML = RENDERERS.budget(y, data[y] || {});
-              card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+              node.classList.toggle('expanded', expanded.budget.has(y));
+              node.innerHTML = RENDERERS.budget(y, data[y] || {});
+              node.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+              bindOnce(node);
             }, { once:true });
-          });
+          };
+          bindOnce(card);
         }
       });
     });
@@ -344,7 +332,7 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
               name:r.name||'',
               unitCost:Number(r.unitCost||0),
               qty:Number(r.qty||0),
-              subtotal:(Number(r.unitCost)||0)*(Number(r.qty)||0),
+              subtotal:(Number(r.subtotal) || (Number(r.unitCost)||0)*(Number(r.qty)||0)),
               note:r.note||'',
               vendor:{
                 name:r.vendor?.name||r.vendor||'',
@@ -777,19 +765,103 @@ function renderDesignCard(y, v){
   return html;
 }
 
-/* ===== 파일 파서 & 템플릿 ===== */
+/* ===== 파일 파서 & 템플릿 (고도화) ===== */
+
+/* 숫자/통화 정규화 */
+function parseMoney(v){
+  if (v == null) return 0;
+  if (typeof v === 'number' && isFinite(v)) return v;
+  const s = String(v).replace(/\s/g,'').replace(/[₩원,]/g,'').replace(/[^0-9.\-xX*]/g, ch => (/[xX\*]/.test(ch)? ch : ''));
+  // 곱셈 표기 처리: "10,000*160" "24,000 x 6"
+  const m = s.match(/^([0-9.]+)\s*[xX\*]\s*([0-9.]+)$/);
+  if (m) return Number(m[1]) * Number(m[2]);
+  const n = Number(s.replace(/[^\d.-]/g,''));
+  return isNaN(n) ? 0 : n;
+}
+
+function parseQty(v){
+  if (v == null) return 0;
+  if (typeof v === 'number' && isFinite(v)) return v;
+  const s = String(v).trim();
+  const m = s.match(/([0-9,.]+)\s*(개|EA|ea|부|명|세트|set)?$/i);
+  if (m) return Number(m[1].replace(/,/g,'')) || 0;
+  // "10,000 * 6" 같은 메모에 있을 때 수량만 뽑기 어려우면 0
+  return Number(s.replace(/[^\d.]/g,'')) || 0;
+}
+
+/* 헤더 키 매핑(유연) */
 function headerMap(h){
   const key = String(h||'').trim().toLowerCase().replace(/\ufeff/g,'');
-  if (/(항목|품목|item|name)/.test(key)) return 'name';
-  if (/(단가|금액|unit.?cost|price)/.test(key)) return 'unitCost';
-  if (/(수량|qty|quantity)/.test(key)) return 'qty';
+  if (/(항목|품목|구분|상세|item|name|description|품명)/.test(key)) return 'name';
+  if (/(단가|금액|unit.?cost|price|가격)/.test(key)) return 'unitCost';
+  if (/(수량|qty|quantity|수량\(ea\)|수량\(개\))/i.test(key)) return 'qty';
+  if (/(소계|금액합계|amount|합계|금액\(원\))/i.test(key)) return 'subtotal';
   if (/(비고|메모|note|remark)/.test(key)) return 'note';
-  if (/(업체|공급처|vendor|company)/.test(key)) return 'vendor';
+  if (/(업체|공급처|vendor|company|업체명)/.test(key)) return 'vendor';
   if (/(email|메일)/.test(key)) return 'email';
   if (/(phone|tel|전화)/.test(key)) return 'phone';
   if (/(site|url|website|웹사이트)/.test(key)) return 'url';
   if (/(address|addr|주소)/.test(key)) return 'address';
   return null;
+}
+
+/* 행이 의미 있는지(빈줄/구분선 제외) */
+function hasMeaningfulCell(row){
+  return row?.some(c => String(c??'').trim().length) || false;
+}
+
+/* 행이 합계/총계 라인인지 */
+function isTotalRow(row){
+  const j = row.map(c=>String(c??'').trim());
+  return j.some(x=>/^(합계|총액|total)$/i.test(x));
+}
+
+/* 다중 컬럼(매트릭스) 탐지: 헤더에 '프로젝트/행사명' 같은 텍스트 + 그 뒤 숫자성 값 열이 여러 개일 때 */
+function detectMatrix(headers, bodyRows){
+  // 숫자 비율이 높은 열을 "숫자열"로 본다.
+  const numericCols = [];
+  for (let c=0; c<headers.length; c++){
+    let nums=0, non=0;
+    for (const r of bodyRows){
+      const v = r[c];
+      if (v===undefined || v===null || String(v).trim()==='') continue;
+      if (typeof v === 'number' || /^[₩\d,.\sxX\*]+$/.test(String(v))) nums++; else non++;
+    }
+    if (nums>0 && nums>=non) numericCols.push(c);
+  }
+  // 숫자열이 2개 이상이고, 왼쪽에 이름 계열 열이 있는 경우 매트릭스로 간주
+  if (numericCols.length >= 2){
+    const nameCols = headers
+      .map((h,i)=>({i, k:headerMap(h)}))
+      .filter(x=>x.k==='name')
+      .map(x=>x.i);
+    return { isMatrix:true, numericCols, nameCols };
+  }
+  return { isMatrix:false, numericCols:[], nameCols:[] };
+}
+
+/* CSV 텍스트 파서 */
+function parseCSV(text){
+  const src = String(text||'').replace(/^\ufeff/,'').replace(/\r\n/g,'\n');
+  const lines = src.split('\n').filter(l => l.length>0);
+  const rows = lines.map(line=>{
+    const cells = [];
+    let cur = '', inQ=false;
+    for (let i=0;i<line.length;i++){
+      const ch = line[i];
+      if (ch === '"' ){
+        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
+        else { inQ=!inQ; }
+      } else if ((ch === ',' || ch === '\t') && !inQ){ // 탭-CSV도 허용
+        cells.push(cur); cur='';
+      } else {
+        cur+=ch;
+      }
+    }
+    cells.push(cur);
+    return cells.map(s=>s.trim());
+  });
+  return rowsFromAOAAdvanced(rows);
 }
 
 async function parseBudgetFile(file){
@@ -810,59 +882,154 @@ async function parseBudgetFile(file){
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type:'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const arr = XLSX.utils.sheet_to_json(ws, { header:1 });
-    return rowsFromAOA(arr);
+    const arr = XLSX.utils.sheet_to_json(ws, { header:1, blankrows:false });
+    return rowsFromAOAAdvanced(arr);
   }
   throw new Error('지원하지 않는 형식');
 }
 
-function parseCSV(text){
-  const src = String(text||'').replace(/^\ufeff/,'').replace(/\r\n/g,'\n');
-  const lines = src.split('\n').filter(l => l.length>0);
-  const rows = lines.map(line=>{
-    const cells = [];
-    let cur = '', inQ=false;
-    for (let i=0;i<line.length;i++){
-      const ch = line[i];
-      if (ch === '"' ){
-        if (inQ && line[i+1]==='"'){ cur+='"'; i++; }
-        else { inQ=!inQ; }
-      } else if (ch === ',' && !inQ){
-        cells.push(cur); cur='';
-      } else {
-        cur+=ch;
+/* 핵심: 난잡한 표도 최대한 흡수하는 AOA 파서 */
+function rowsFromAOAAdvanced(rows){
+  if(!rows || !rows.length) return [];
+
+  // 1) 헤더 후보를 상위 10줄에서 탐색
+  let headerRowIdx = -1;
+  for (let i=0; i<Math.min(rows.length, 10); i++){
+    const r = rows[i] || [];
+    const mapped = r.map(headerMap).filter(Boolean);
+    if (mapped.length >= 1){ headerRowIdx = i; break; }
+  }
+  if (headerRowIdx === -1){
+    // 헤더가 전혀 없다 → 각 행을 "기타 비용"으로 묶기
+    return rows
+      .filter(hasMeaningfulCell)
+      .filter(r=>!isTotalRow(r))
+      .map(r=>({
+        name: (r.find(x=>isNaN(parseMoney(x))) ?? '기타 비용').toString(),
+        unitCost: 0,
+        qty: 0,
+        subtotal: r.map(parseMoney).reduce((a,b)=>a+b,0),
+        note: r.map(x=>String(x??'')).join(' | ')
+      })).filter(x=>x.subtotal>0);
+  }
+
+  const headers = rows[headerRowIdx];
+  const body    = rows.slice(headerRowIdx+1).filter(hasMeaningfulCell);
+
+  // 2) 매트릭스(다중 금액열) 여부 판단
+  const mx = detectMatrix(headers, body);
+  const mappedHeaders = headers.map(headerMap);
+
+  // 3-A) 매트릭스인 경우: 이름열(여러개면 합쳐서) + 숫자열 별로 행 생성
+  if (mx.isMatrix){
+    const nameCols = mx.nameCols.length ? mx.nameCols : headers.map((h,i)=>headerMap(h)==='name'?i:null).filter(v=>v!=null);
+    const titleForCol = (c)=> String(headers[c]||`항목${c+1}`).trim();
+    const out = [];
+    for (const r of body){
+      if (isTotalRow(r)) continue;
+      const baseName = nameCols.length
+        ? nameCols.map(i=>String(r[i]??'').trim()).filter(Boolean).join(' ')
+        : String(r.find((v,idx)=>!mx.numericCols.includes(idx)) ?? '').trim();
+      const name = baseName || '기타 비용';
+      for (const c of mx.numericCols){
+        const val = parseMoney(r[c]);
+        if (!val) continue;
+        out.push({
+          name: `${name} - ${titleForCol(c)}`,
+          unitCost: 0,
+          qty: 0,
+          subtotal: val,
+          note: '',
+          vendor: {}
+        });
       }
     }
-    cells.push(cur);
-    return cells.map(s=>s.trim());
-  });
-  return rowsFromAOA(rows);
-}
+    return out;
+  }
 
-function rowsFromAOA(rows){
-  if(!rows.length) return [];
-  const head = rows[0].map(headerMap);
-  return rows.slice(1).filter(r=>r.some(c=>String(c||'').trim().length)).map(r=>{
-    const obj = {};
-    head.forEach((k,idx)=>{
-      if(!k) return;
-      obj[k] = r[idx];
-    });
-    const vendor = (obj.vendor||obj.company) ? { name:obj.vendor||obj.company } : {};
-    if (obj.email) vendor.email = obj.email;
-    if (obj.phone) vendor.phone = obj.phone;
-    if (obj.url)   vendor.site  = obj.url;
-    if (obj.address) vendor.addr = obj.address;
-    return {
-      name: obj.name||'',
-      unitCost: Number(obj.unitCost||0),
-      qty: Number(obj.qty||0),
-      note: obj.note||'',
+  // 3-B) 일반 테이블: 유연 매핑 + 패턴 인식
+  const col = {
+    name: mappedHeaders.findIndex(k=>k==='name'),
+    unitCost: mappedHeaders.findIndex(k=>k==='unitCost'),
+    qty: mappedHeaders.findIndex(k=>k==='qty'),
+    subtotal: mappedHeaders.findIndex(k=>k==='subtotal'),
+    note: mappedHeaders.findIndex(k=>k==='note'),
+    vendor: mappedHeaders.findIndex(k=>k==='vendor'),
+    email: mappedHeaders.findIndex(k=>k==='email'),
+    phone: mappedHeaders.findIndex(k=>k==='phone'),
+    url: mappedHeaders.findIndex(k=>k==='url'),
+    address: mappedHeaders.findIndex(k=>k==='address'),
+  };
+
+  const out = [];
+  for (const r of body){
+    if (isTotalRow(r)) continue;
+
+    // 이름 추출: name 열이 없으면 좌측 텍스트성 셀을 사용
+    let name = (col.name>-1 ? r[col.name] : r.find((v,i)=>isNaN(parseMoney(v)) && String(v??'').trim().length>0)) || '';
+    name = String(name||'').trim() || '기타 비용';
+
+    // 단가/수량/소계 추출
+    const unitCost = col.unitCost>-1 ? parseMoney(r[col.unitCost]) : 0;
+    const qtyRaw   = col.qty>-1 ? r[col.qty] : '';
+    const qty      = parseQty(qtyRaw);
+
+    let subtotal   = col.subtotal>-1 ? parseMoney(r[col.subtotal]) : 0;
+
+    // 비고/메모 + 곱셈 패턴 계산 보조
+    const noteStr  = String(col.note>-1 ? (r[col.note]??'') : '');
+    if (!subtotal){
+      // note에서 "A x B" 패턴 감지해 소계 계산
+      const m = noteStr.replace(/\s/g,'').match(/([0-9,]+)\s*[xX\*]\s*([0-9,]+)/);
+      if (m){
+        const a = Number(m[1].replace(/,/g,''))||0;
+        const b = Number(m[2].replace(/,/g,''))||0;
+        subtotal = a*b;
+      }
+    }
+    if (!subtotal && unitCost && qty){
+      subtotal = unitCost * qty;
+    }
+    // 모든 숫자 셀 합으로 소계를 보정(헤더 매핑이 희미할 때)
+    if (!subtotal){
+      const sumNums = r.map(parseMoney).reduce((a,b)=>a+b,0);
+      if (sumNums>0 && !(unitCost||qty)) subtotal = sumNums;
+    }
+
+    // 벤더 정리
+    const vendor = {};
+    const vName  = (col.vendor>-1 && r[col.vendor]) ? String(r[col.vendor]).trim() : '';
+    if (vName) vendor.name = vName;
+    if (col.email>-1 && r[col.email]) vendor.email = String(r[col.email]).trim();
+    if (col.phone>-1 && r[col.phone]) vendor.phone = String(r[col.phone]).trim();
+    if (col.url>-1   && r[col.url])   vendor.site  = String(r[col.url]).trim();
+    if (col.address>-1 && r[col.address]) vendor.addr = String(r[col.address]).trim();
+
+    // 완성
+    const row = {
+      name,
+      unitCost,
+      qty,
+      subtotal,
+      note: noteStr,
       vendor
     };
-  });
+    // 의미 없는 행은 스킵
+    if (!row.name && !row.subtotal) continue;
+
+    out.push(row);
+  }
+
+  // 4) 빈 배열이면 마지막 폴백: 전체 숫자 합을 "기타 비용"으로
+  if (!out.length){
+    const sum = rows.flat().map(parseMoney).reduce((a,b)=>a+b,0);
+    if (sum>0) out.push({ name:'기타 비용', unitCost:0, qty:0, subtotal:sum, note:'' });
+  }
+
+  return out;
 }
 
+/* 템플릿 다운로드 */
 function csvEscapeField(s){
   const needs = /[",\n]/.test(s);
   if (!needs) return s;
