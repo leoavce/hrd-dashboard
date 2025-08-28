@@ -17,10 +17,14 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
   // 최초 데이터 로드
   let data = await loadYears(db, programId, years);
 
+  // ⬇︎ (신규) 예산 카드 펼침 상태 저장(연도 단위)
+  const expanded = { budget: new Set() };
+
   // 렌더러 맵 (부분 갱신 시 사용)
   const RENDERERS = {
     content: renderContentCard,
-    budget:  renderBudgetCard,
+    // budget은 펼침 여부를 함께 반영
+    budget:  (y,v)=>renderBudgetCard(y, v, expanded.budget.has(y)),
     outcome: renderOutcomeCard,
     design:  renderDesignCard,
   };
@@ -52,11 +56,39 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
     const paint = ()=>{
       const s = slice();
       yBox.textContent = s.join('  |  ');
-      host.innerHTML = s.map(y=>`<article class="it-card" data-year="${y}"></article>`).join('');
+      // ⬇︎ budget 섹션은 카드에 식별 클래스를 부여하고, 펼친 카드엔 expanded 클래스 부여
+      host.innerHTML = s.map(y=>{
+        const extra = (kind==='budget' ? ` budget-card ${expanded.budget.has(y)?'expanded':''}` : '');
+        return `<article class="it-card${extra}" data-year="${y}"></article>`;
+      }).join('');
       host.querySelectorAll('.it-card').forEach(el=>{
         const y = el.dataset.year;
         el.innerHTML = renderer(y, data[y] || {});
+        // 상세 모달
         el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
+        // ⬇︎ (신규) 예산 카드 펼치기/접기
+        if (kind==='budget'){
+          el.querySelector('.expand-btn')?.addEventListener('click', ()=>{
+            if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
+            el.classList.toggle('expanded', expanded.budget.has(y));
+            // 카드만 부분 재렌더(다른 카드 영향 없음)
+            el.innerHTML = RENDERERS.budget(y, data[y] || {});
+            el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+            el.querySelector('.expand-btn')?.addEventListener('click', ()=> {
+              if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
+              el.classList.toggle('expanded', expanded.budget.has(y));
+              el.innerHTML = RENDERERS.budget(y, data[y] || {});
+              el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+              el.querySelector('.expand-btn')?.addEventListener('click', ()=> {
+                if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
+                el.classList.toggle('expanded', expanded.budget.has(y));
+                el.innerHTML = RENDERERS.budget(y, data[y] || {});
+                el.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+                // 루프 방지용 3중 바인딩을 막기 위해 여기서 종료
+              }, { once:true });
+            }, { once:true });
+          });
+        }
       });
     };
     mount.querySelector(`[data-kind="${kind}"] .nav.prev`).addEventListener('click', ()=>{ index = clamp(index-1); paint(); });
@@ -80,8 +112,24 @@ export async function renderItemSection({ db, storage, programId, mount, years, 
       shownYears.forEach(y=>{
         const card = host.querySelector(`.it-card[data-year="${y}"]`);
         if (!card) return;
+        // 상태 유지: budget 펼침 반영
+        if (kind==='budget') card.classList.toggle('expanded', expanded.budget.has(y));
         card.innerHTML = RENDERERS[kind](y, data[y] || {});
         card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail(kind, y));
+        if (kind==='budget'){
+          card.querySelector('.expand-btn')?.addEventListener('click', ()=>{
+            if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
+            card.classList.toggle('expanded', expanded.budget.has(y));
+            card.innerHTML = RENDERERS.budget(y, data[y] || {});
+            card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+            card.querySelector('.expand-btn')?.addEventListener('click', ()=> {
+              if (expanded.budget.has(y)) expanded.budget.delete(y); else expanded.budget.add(y);
+              card.classList.toggle('expanded', expanded.budget.has(y));
+              card.innerHTML = RENDERERS.budget(y, data[y] || {});
+              card.querySelector('.see-detail')?.addEventListener('click', ()=> openDetail('budget', y));
+            }, { once:true });
+          });
+        }
       });
     });
   };
@@ -626,10 +674,12 @@ function renderContentCard(y, v){
   `;
 }
 
-/* ▶ 미리보기: 예산은 '합계만' 크게 노출 */
-function renderBudgetCard(y, v){
+/* ▶ 미리보기: 예산은 '합계만' 크게 노출 + 펼치기/접기 버튼 */
+function renderBudgetCard(y, v, isExpanded=false){
   const total = (v?.budget?.items||[]).reduce((s,it)=>s+(Number(it.subtotal)||0),0);
   const count = (v?.budget?.items||[]).length;
+  const expandHTML = isExpanded ? renderBudgetExpandHTML(v) : '';
+  const expandBtnLabel = isExpanded ? '접기' : '펼치기';
   return `
     <div class="cap">${y}</div>
     <div class="kpi-total">
@@ -637,7 +687,47 @@ function renderBudgetCard(y, v){
       <div class="v">${fmt.format(total)}<span class="unit"> 원</span></div>
       <div class="sub">${count}개 항목</div>
     </div>
-    <div class="ft"><button class="btn small see-detail">상세 보기</button></div>
+    ${expandHTML}
+    <div class="ft">
+      <button class="btn small see-detail">상세 보기</button>
+      <button class="btn small ghost expand-btn">${expandBtnLabel}</button>
+    </div>
+  `;
+}
+
+/* ▶ 펼친 본문(읽기 전용 비교용) */
+function renderBudgetExpandHTML(v){
+  const items = (v?.budget?.items||[]).map(it=>({
+    name: it?.name||'',
+    unitCost: Number(it?.unitCost||0),
+    qty: Number(it?.qty||0),
+    subtotal: Number(it?.subtotal||((Number(it?.unitCost)||0)*(Number(it?.qty)||0))),
+    vendor: it?.vendor?.name || ''
+  }));
+  const rows = items.map(it=>`
+    <tr>
+      <td class="n">${esc(it.name)}</td>
+      <td class="r">${fmt.format(it.unitCost)}</td>
+      <td class="r">${it.qty}</td>
+      <td class="r">${fmt.format(it.subtotal)}</td>
+      <td class="n">${esc(it.vendor||'')}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="5" class="muted">항목 없음</td></tr>`;
+
+  const sum = items.reduce((s,it)=> s+(Number(it.subtotal)||0),0);
+
+  return `
+    <div class="bd-expand">
+      <div class="bd-body">
+        <table class="bd-table">
+          <thead>
+            <tr><th>항목</th><th>단가</th><th>수량</th><th>소계</th><th>업체</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><th colspan="3" class="r">합계</th><th class="r">${fmt.format(sum)}</th><th></th></tr></tfoot>
+        </table>
+      </div>
+    </div>
   `;
 }
 
@@ -981,6 +1071,20 @@ function ensureStyle(){
   .gal .thumb button{display:block; width:100%; height:100%; border:0; padding:0; background:none; cursor:pointer}
   .link-hint{opacity:.8}
   .mini-memo{color:#cfe2ff}
+
+  /* ⬇︎ (신규) 예산 카드 펼침 스타일 */
+  .budget-card.expanded{ max-height:460px; }
+  .budget-card .bd-expand{ margin-top:6px; border-top:1px dashed #223246; padding-top:6px; }
+  .budget-card .bd-body{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  .budget-card .bd-table{ width:100%; border-collapse:separate; border-spacing:0; font-size:.92rem; }
+  .budget-card .bd-table thead th{
+    position:sticky; top:0; background:#0f1b22; z-index:1; border-bottom:1px solid #223246; padding:8px 10px; text-align:left;
+  }
+  .budget-card .bd-table tbody td,
+  .budget-card .bd-table tfoot th{ padding:8px 10px; border-bottom:1px solid #132235; }
+  .budget-card .bd-table .r{ text-align:right; }
+  .budget-card .bd-table .n{ text-align:left; }
+  .budget-card .bd-table tfoot th{ background:#0c1522; position:sticky; bottom:0; }
   `;
   document.head.appendChild(s);
 
