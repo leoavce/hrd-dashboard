@@ -5,11 +5,11 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebas
 import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "", 
-  appId: "",
+  apiKey: "AIzaSyAFlG7wqAr--sQPup19ztOS5wZk4Kq_xpE",
+  authDomain: "dashboard-7bb43.firebaseapp.com",
+  projectId: "dashboard-7bb43",
+  storageBucket: "dashboard-7bb43.firebasestorage.app", 
+  appId: "1:271394458680:web:9948d64b646bcefdfb6acd",
 };
 
 export const app = initializeApp(firebaseConfig);
